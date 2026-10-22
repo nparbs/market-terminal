@@ -107,7 +107,7 @@ function renderWatch(prev = {}) {
       <td><div class="wsym">${esc(LABELS[s] || s)}${n ? `<span class="dot" title="${n} post(s) mention this in 24h">●${n}</span>` : ""}</div>
           <div class="wname">${esc(q.error ? "no data" : q.name || "")}</div></td>
       <td class="num">${fmtPx(q.price, s)}</td>
-      <td class="num ${cls(q.pct)}">${fmtPct(q.pct)}</td>
+      <td class="num ${cls(q.pct)}">${fmtPct(q.pct)}${q.ext ? `<div class="ext ${cls(q.ext.pct)}">${q.ext.session === "pre" ? "PRE" : "AH"} ${fmtPct(q.ext.pct)}</div>` : ""}</td>
       <td>${spark(q.spark, (q.pct || 0) >= 0)}</td></tr>`;
   }).join("") || `<tr><td colspan="4" class="empty">Empty. Type ADD NVDA</td></tr>`;
 }
@@ -177,13 +177,15 @@ async function loadChart(sym, range) {
   if (!S.quotes[S.sym]) refreshQuotes();
   if (S.tab === "news" && S.sub.newsSym) renderTab();
   if (S.tab === "ins" && S.sub.insMode === "sym") renderTab();
+  if (S.tab === "flow" && S.sub.flowScope === "sym") renderTab();
 }
 
 function renderChartHead() {
   const q = S.quotes[S.sym];
   if (!q) return;
   $("#cpx").textContent = fmtPx(q.price, S.sym);
-  $("#cchg").innerHTML = `<span class="${cls(q.change)}">${q.change != null ? (q.change > 0 ? "+" : "") + fmtPx(q.change, S.sym) : ""} ${fmtPct(q.pct)}</span>`;
+  $("#cchg").innerHTML = `<span class="${cls(q.change)}">${q.change != null ? (q.change > 0 ? "+" : "") + fmtPx(q.change, S.sym) : ""} ${fmtPct(q.pct)}</span>`
+    + (q.ext ? ` <span class="dim">${q.ext.session === "pre" ? "PRE" : "AFTER"}</span> <span class="${cls(q.ext.pct)}">${fmtPx(q.ext.price, S.sym)} ${fmtPct(q.ext.pct)}</span>` : "");
 }
 
 function markerCandidates() {
@@ -313,21 +315,52 @@ function beep() {
 }
 
 let titleTimer = null;
-function fireAlert(p) {
+function notifyUser({ title, body, tag, blink, onclick }) {
   beep();
-  msg(`⚠ ${p.person}: ${p.text.slice(0, 120)}`);
+  msg(`⚠ ${title}: ${body.slice(0, 120)}`);
   if (S.notify && "Notification" in window && Notification.permission === "granted") {
     try {
-      const n = new Notification(`⚠ ${p.person} (${SRC[p.source] || p.source})`, { body: p.text.slice(0, 240) + (p.tickers.length ? `\n${p.tickers.join(" ")}` : ""), tag: p.id });
-      n.onclick = () => { window.focus(); selectPost(p.id, true); };
+      const n = new Notification(title, { body: body.slice(0, 260), tag });
+      n.onclick = () => { window.focus(); onclick && onclick(); };
     } catch {}
   }
   clearInterval(titleTimer);
-  let n = 0;
+  let i = 0;
   titleTimer = setInterval(() => {
-    document.title = n % 2 ? "Market Terminal" : `⚠ ${p.person.toUpperCase()} POSTED`;
-    if (++n > 30) { clearInterval(titleTimer); document.title = "Market Terminal"; }
+    document.title = i % 2 ? "Market Terminal" : blink;
+    if (++i > 30) { clearInterval(titleTimer); document.title = "Market Terminal"; }
   }, 1000);
+}
+
+function fireAlert(p) {
+  notifyUser({
+    title: `⚠ ${p.person} (${SRC[p.source] || p.source})`, tag: p.id,
+    body: p.text.slice(0, 240) + (p.tickers.length ? `\n${p.tickers.join(" ")}` : ""),
+    blink: `⚠ ${p.person.toUpperCase()} POSTED`, onclick: () => selectPost(p.id, true),
+  });
+}
+
+const fmtMoney = (v) => v == null ? "--" : v >= 1e9 ? `$${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `$${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `$${Math.round(v / 1e3)}K` : `$${Math.round(v)}`;
+const fmtInt = (v) => v == null ? "--" : Math.round(v).toLocaleString("en-US");
+const contractLabel = (u) => `${u.symbol} ${u.exp.slice(5)} ${u.strike}${u.type}`;
+
+let flowTimer = null;
+function onFlow(ev) {
+  const u = ev.item;
+  if (S.tab === "flow" && !flowTimer) flowTimer = setTimeout(() => { flowTimer = null; renderTab(); }, 15000);
+  if (!ev.notify) return;
+  notifyUser({
+    title: `⚡ Unusual options: ${contractLabel(u)}`, tag: u.contract,
+    body: `${fmtMoney(u.premium)} premium · ${fmtInt(u.volume)} contracts (${u.vol_oi}× OI) · ${u.fill}${u.lean ? " · leans " + u.lean : ""}${u.mentioned ? " · mentioned in a post today" : ""}`,
+    blink: `⚡ ${u.symbol} OPTIONS FLOW`, onclick: () => { loadChart(u.symbol); S.sub.flowScope = "sym"; showTab("flow"); },
+  });
+}
+
+function onBrief(ev) {
+  if (S.tab === "brief") renderTab();
+  else { S.briefUnseen = true; renderTabs(); }
+  notifyUser({ title: `☀ ${ev.kind} ready`, body: ev.headline || "Open the BRIEF tab", tag: "brief-" + ev.day,
+    blink: "☀ BRIEF READY", onclick: () => showTab("brief") });
 }
 
 function connectStream() {
@@ -336,6 +369,8 @@ function connectStream() {
   es.onerror = () => { $("#conn").className = "bad"; };
   es.onmessage = (e) => {
     let ev; try { ev = JSON.parse(e.data); } catch { return; }
+    if (ev.type === "flow") return onFlow(ev);
+    if (ev.type === "brief") return onBrief(ev);
     if (ev.type !== "post") return;
     const p = ev.post;
     if (S.byId[p.id]) return;
@@ -354,15 +389,19 @@ function connectStream() {
 /* ============================================================ bottom tabs */
 
 const TABS = [
-  ["news", "NEWS"], ["cal", "ECO CAL"], ["cong", "CONGRESS"], ["ins", "INSIDERS"], ["f13", "13F"],
-  ["pred", "PREDICT"], ["track", "TRACK REC"], ["impact", "POST IMPACT"], ["status", "SOURCES"], ["help", "HELP"],
+  ["brief", "BRIEF"], ["news", "NEWS"], ["cal", "ECO CAL"], ["flow", "OPT FLOW"], ["cong", "CONGRESS"], ["ins", "INSIDERS"],
+  ["pred", "PREDICT"], ["track", "TRACK REC"], ["impact", "POST IMPACT"], ["f13", "13F"], ["status", "SOURCES"], ["help", "HELP"],
 ];
 
 function renderTabs() {
-  $("#tabs").innerHTML = TABS.map(([id, label], i) => `<button data-tab="${id}" class="${S.tab === id ? "on" : ""}" title="Alt+${(i + 1) % 10}"><span class="k">${(i + 1) % 10}</span>${label}</button>`).join("");
+  $("#tabs").innerHTML = TABS.map(([id, label], i) => {
+    const k = i < 10 ? (i + 1) % 10 : "";
+    const dot = id === "brief" && S.briefUnseen ? `<span class="tabdot">●</span>` : "";
+    return `<button data-tab="${id}" class="${S.tab === id ? "on" : ""}" ${k !== "" ? `title="Alt+${k}"` : ""}><span class="k">${k}</span>${label}${dot}</button>`;
+  }).join("") + `<span style="flex:1"></span><button id="maxbtn" title="Maximize this panel (MAX)">${S.max ? "⤡ RESTORE" : "⤢ MAX"}</button>`;
 }
 
-function showTab(id) { S.tab = id; store.set("tab", id); renderTabs(); renderTab(); }
+function showTab(id) { S.tab = id; if (id === "brief") S.briefUnseen = false; store.set("tab", id); renderTabs(); renderTab(); }
 
 function seg(name, opts, cur) {
   return `<span class="seg" data-seg="${name}">${opts.map(([v, l]) => `<button data-v="${esc(v)}" class="${v === cur ? "on" : ""}">${esc(l)}</button>`).join("")}</span>`;
@@ -385,6 +424,66 @@ async function renderTab() {
 }
 
 const TAB_RENDER = {
+  async brief(bar, body, live) {
+    const days = await api("brief/days");
+    if (!live()) return;
+    const day = S.sub.briefDay || "";
+    const draw = (b) => {
+      bar.innerHTML = `<select id="briefday"><option value="">Latest</option>${days.map((x) => `<option ${x === day ? "selected" : ""}>${esc(x)}</option>`).join("")}</select>
+        <button class="tbtn" id="briefnow">↻ BUILD NOW</button>
+        ${b && !b.empty ? `<span class="dim">${esc(b.kind)} · built ${esc(fmtET(b.ts, true))} ET · covers since ${esc(fmtET(b.since, true))} ET</span>` : ""}
+        <span class="dim">Auto-builds weekdays at ${esc(S.cfg.brief_time || "08:30")} ET</span>`;
+      $("#briefday").onchange = (e) => { S.sub.briefDay = e.target.value; renderTab(); };
+      $("#briefnow").onclick = async () => { body.innerHTML = `<div class="empty">Building brief…</div>`; draw(await api("brief?refresh=1")); };
+      if (!b || b.empty) { body.innerHTML = `<div class="empty">No brief yet. One is built automatically each weekday at ${esc(S.cfg.brief_time || "08:30")} ET, or press BUILD NOW.</div>`; return; }
+      if (b.error) { body.innerHTML = errBox(b); return; }
+      body.innerHTML = briefHTML(b);
+    };
+    const cached = await api(day ? "brief?day=" + day : "brief");
+    if (live()) draw(cached);
+  },
+
+  async flow(bar, body, live) {
+    const st = { flowType: "", flow0: "hide", flowMin: "100000", flowScope: "", flowSort: "score", ...S.sub };
+    S.sub = { ...S.sub, ...st };
+    const scopeOpts = [["", "ALL"], ["mentioned", "MENTIONED"], ["watch", "WATCHLIST"], ["sym", S.sym]];
+    bar.innerHTML = seg("flowScope", scopeOpts, st.flowScope) + seg("flowType", [["", "C+P"], ["C", "CALLS"], ["P", "PUTS"]], st.flowType)
+      + seg("flow0", [["hide", "NO 0DTE"], ["show", "+0DTE"]], st.flow0)
+      + seg("flowMin", [["100000", "$100K+"], ["500000", "$500K+"], ["1000000", "$1M+"]], st.flowMin)
+      + seg("flowSort", [["score", "UNUSUAL"], ["premium", "PREMIUM"], ["vol_oi", "VOL/OI"]], st.flowSort)
+      + `<button class="tbtn" id="rescan">↻ RESCAN</button><span class="dim" id="flowasof"></span>`;
+    if (!body.querySelector(".flowgrid")) loading();
+    const d = await api("options/flow");
+    if (!live()) return;
+    $("#rescan").onclick = async () => { await fetch("/api/options/scan", { method: "POST" }); msg("Options rescan started (takes ~20s)"); setTimeout(renderTab, 20000); };
+    if (!d.summary.length) { body.innerHTML = `<div class="empty">${d.scanning ? "First options scan in progress…" : "No options data yet."} Scanning ${d.universe_size} tickers from CBOE.</div>`; return; }
+    const asof = d.summary[0].asof;
+    $("#flowasof").textContent = `CBOE delayed · data as of ${asof.replace("T", " ")} ET · scanned ${ago(d.last_scan)} ago · ${d.summary.length} tickers`;
+    const inScope = (s, mentioned) => !st.flowScope || (st.flowScope === "mentioned" && mentioned) || (st.flowScope === "watch" && S.watch.includes(s)) || (st.flowScope === "sym" && s === S.sym);
+    const rows = d.summary.filter((r) => inScope(r.symbol, r.mentioned));
+    const items = d.unusual.filter((u) => inScope(u.symbol, u.mentioned) && (!st.flowType || u.type === st.flowType)
+      && (st.flow0 === "show" || u.dte > 0) && u.premium >= +st.flowMin).sort((a, b) => b[st.flowSort] - a[st.flowSort]);
+    const star = (m) => (m ? `<span class="amber" title="Mentioned in a post in the last 24h">★</span>` : "");
+    body.innerHTML = `<div class="flowgrid">
+      <div class="fcol"><table><thead><tr><th>TICKER</th><th class="num">CHG</th><th class="num">CALL VOL</th><th class="num">PUT VOL</th><th class="num">P/C</th><th class="num">IV30</th><th class="num" title="Total contract volume vs this ticker's recorded average (needs 3+ days of history)">VOL/AVG</th><th class="num">UNUSUAL</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr class="click ${r.symbol === S.sym ? "sel" : ""}" data-flowsym="${esc(r.symbol)}"><td>${star(r.mentioned)} <span class="wsym">${esc(r.symbol)}</span></td>
+        <td class="num ${cls(r.change_pct)}">${fmtPct(r.change_pct)}</td><td class="num">${fmtInt(r.call_vol)}</td><td class="num">${fmtInt(r.put_vol)}</td>
+        <td class="num ${r.pc_ratio > 1.2 ? "down" : r.pc_ratio < 0.6 ? "up" : ""}" title="Call premium ${fmtMoney(r.call_prem)} · put premium ${fmtMoney(r.put_prem)}">${r.pc_ratio ?? "--"}</td>
+        <td class="num">${r.iv30 != null ? r.iv30.toFixed(1) : "--"}<span class="${cls(r.iv30_change)}" style="font-size:10px"> ${r.iv30_change != null ? (r.iv30_change > 0 ? "+" : "") + r.iv30_change.toFixed(1) : ""}</span></td>
+        <td class="num ${r.vol_vs_avg >= 2 ? "amber" : ""}">${r.vol_vs_avg != null ? r.vol_vs_avg.toFixed(1) + "×" : `<span class="dim" title="${r.history_days || 0} days recorded">--</span>`}</td>
+        <td class="num">${r.unusual_count} · ${fmtMoney(r.unusual_prem)}</td></tr>`).join("")}
+      </tbody></table></div>
+      <div class="fcol"><table><thead><tr><th>CONTRACT</th><th class="num">DTE</th><th>LEAN · FILL</th><th class="num">PREMIUM</th><th class="num">VOL</th><th class="num">OI</th><th class="num">VOL/OI</th><th class="num">LAST</th><th class="num">IV</th><th class="num">OTM</th></tr></thead><tbody>
+      ${items.slice(0, 200).map((u) => `<tr><td>${star(u.mentioned)} <span class="chip" data-sym="${esc(u.symbol)}">${esc(u.symbol)}</span> ${esc(u.exp.slice(5))} <b class="${u.type === "C" ? "up" : "down"}">${u.strike}${u.type}</b></td>
+        <td class="num">${u.dte}</td><td><span class="${u.lean === "bull" ? "up" : u.lean === "bear" ? "down" : "dim"}">${u.lean === "bull" ? "▲ BULL" : u.lean === "bear" ? "▼ BEAR" : "·"}</span> <span class="dim">${u.fill}</span></td>
+        <td class="num" style="color:#fff">${fmtMoney(u.premium)}</td><td class="num">${fmtInt(u.volume)}</td><td class="num dim">${fmtInt(u.oi)}</td><td class="num ${u.vol_oi >= 5 ? "amber" : ""}">${u.vol_oi}×</td>
+        <td class="num">${u.last}</td><td class="num dim" title="delta ${u.delta != null ? u.delta.toFixed(2) : "?"}">${u.iv}</td>
+        <td class="num ${u.otm_pct < 0 ? "dim" : ""}" title="${u.otm_pct < 0 ? "in the money" : "out of the money"}">${u.otm_pct != null ? u.otm_pct.toFixed(1) + "%" : ""}</td></tr>`).join("")}
+      </tbody></table>${items.length ? "" : `<div class="empty">No contracts match these filters.</div>`}
+      <div class="note" style="padding:6px 8px">Unusual = volume ≥ ${fmtInt(500)}, premium ≥ $100K and volume ≥ 1.5× open interest (new positions likely). Fill/lean are estimated from the last print vs the current bid/ask, not trade-by-trade data. Negative OTM = in the money.</div></div>
+    </div>`;
+  },
+
   async news(bar, body, live) {
     const symMode = !!S.sub.newsSym;
     bar.innerHTML = seg("newsSym", [["", "MARKET WIRE"], ["1", `${S.sym} HEADLINES`]], symMode ? "1" : "");
@@ -556,17 +655,60 @@ const TAB_RENDER = {
       ["NEWS  /  NEWS NVDA", "Market wire / ticker headlines"], ["CAL", "Economic calendar"],
       ["CONG  /  CONG NVDA  /  CONG PELOSI", "Congressional trades"], ["INS  /  INS NVDA  /  INS BUYS", "Insider trades"],
       ["13F", "Latest fund holdings filings"], ["PRED  /  KALSHI  /  PRED CRYPTO", "Prediction markets"],
+      ["BRIEF", "Pre-market brief (auto-built weekdays; BUILD NOW in the tab)"],
+      ["OPT  /  OPT NVDA  /  OPT PUTS", "Unusual options flow (also OPT MENTIONED, OPT WATCH)"],
       ["TRACK", "Post-impact track record per person"], ["IMPACT", "Impact of the selected post"],
       ["FEED TRUMP  /  FEED ALL", "Filter the market-movers feed by person"], ["ALERTS", "Show only alert posts"],
       ["ALERT NVIDIA", "Add your own alert keyword (stored in this browser)"], ["UNALERT NVIDIA", "Remove a custom alert keyword"],
-      ["ALERT", "List custom alert keywords"], ["MUTE  /  UNMUTE", "Alert sound off/on"],
+      ["ALERT", "List custom alert keywords"], ["MUTE  /  UNMUTE", "Alert sound off/on"], ["MAX", "Maximize / restore the bottom panel"],
       ["STATUS", "Data source health"], ["Alt+1 … Alt+0", "Switch bottom tabs"], ["/", "Focus the command bar"], ["Esc", "Clear command bar"],
     ];
     body.innerHTML = `<div class="help">${h.map(([k, v]) => `<div><code>${esc(k)}</code> <span class="dim">${esc(v)}</span></div>`).join("")}
+      <div style="margin-top:10px"><span class="amber">Options alerts</span> <span class="dim">fire when a new unusual contract has $500K+ premium and 3×+ open interest on a ticker mentioned in a post in the last 24h (change alert_scope in config.json to "watchlist" or "all").</span></div>
       <div style="margin-top:10px"><span class="amber">Alerts</span> <span class="dim">fire on new posts from direct sources (Truth Social, X, official feeds) that hit an alert topic
       (tariffs, China, Fed, war, fiscal), an alert keyword, a watchlist company, or one of your custom keywords. Edit topics and keywords in config.json.</span></div></div>`;
   },
 };
+
+/* ============================================================ brief layout */
+
+function briefHTML(b) {
+  const qrow = (q) => `<tr class="click" data-sym="${esc(q.symbol)}"><td class="wsym">${esc(LABELS[q.symbol] || GLOBAL_LABELS[q.symbol] || q.symbol)}</td>
+    <td class="num">${fmtPx(q.price, q.symbol)}</td><td class="num ${cls(q.pct)}">${fmtPct(q.pct)}</td></tr>`;
+  const mrow = (q) => `<tr class="click" data-sym="${esc(q.symbol)}"><td class="wsym">${esc(q.symbol)}</td><td class="num">${fmtPx(q.price)}</td>
+    <td class="num ${cls(q.move)}">${fmtPct(q.move)}</td><td class="dim">${q.basis === "pre" ? "PRE" : ""}</td></tr>`;
+  const card = (title, inner, cls_ = "") => `<div class="bcard ${cls_}"><h4>${title}</h4>${inner}</div>`;
+  const P = b.posts, M = b.movers, O = b.options;
+  const optRow = (u) => `<tr><td><span class="chip" data-sym="${esc(u.symbol)}">${esc(u.symbol)}</span> ${esc(u.exp.slice(5))} <b class="${u.type === "C" ? "up" : "down"}">${u.strike}${u.type}</b></td>
+    <td class="num">${fmtMoney(u.premium)}</td><td class="num">${u.vol_oi}×</td><td class="${u.lean === "bull" ? "up" : u.lean === "bear" ? "down" : "dim"}">${u.lean || ""}</td></tr>`;
+  return `<div class="bhead">${esc(b.headline || b.kind)}</div><div class="bcards">
+    ${card("FUTURES & MACRO", `<table>${b.futures.map(qrow).join("")}</table>`)}
+    ${card(`OVERNIGHT POSTS <span class="dim">since ${esc(fmtET(b.since, true))} ET</span>`,
+      `<div class="bstat"><b>${P.count}</b> direct posts · <b class="${P.alert_count ? "down" : ""}">${P.alert_count}</b> alerts · ${P.news_count} news items</div>
+      <div class="bline">${P.by_person.map(([p, n]) => `<span style="color:${personColor(p)}">${esc(p)} ${n}</span>`).join(" · ") || `<span class="dim">quiet night</span>`}</div>
+      ${P.topics.length ? `<div class="bline">${P.topics.map(([t, n]) => `<span class="cat">${esc(t)} ${n}</span>`).join(" ")}</div>` : ""}
+      ${P.alerts.map((p) => `<div class="balert click" data-post="${esc(p.id)}"><span class="dim">${esc(fmtET(p.ts))}</span> <b style="color:${personColor(p.person)}">${esc(p.person)}</b> ${esc(p.text.slice(0, 180))}
+        <div>${p.tickers.slice(0, 6).map((t) => `<span class="chip" data-sym="${esc(t)}">${esc(t)}</span>`).join(" ")}</div></div>`).join("")}`, "wide")}
+    ${card(`${esc(b.calendar_label || "TODAY'S CALENDAR")} <span class="dim">USD · high/med</span>`, b.calendar.length ? `<table>${b.calendar.map((e) => {
+      const p = etParts(new Date(e.ts * 1000));
+      return `<tr><td>${p.hour}:${p.minute}</td><td class="imp-${esc(e.impact)}">${esc(e.impact[0])}</td><td>${esc(e.title)}</td><td class="num dim">${esc(e.forecast || "")}</td><td class="num dim">${esc(e.previous || "")}</td></tr>`;
+    }).join("")}</table><div class="note">columns: forecast · previous</div>` : `<div class="dim">No major US releases today.</div>`)}
+    ${card("GLOBAL MARKETS", `<table>${b.global.map(qrow).join("")}</table>`)}
+    ${card("BIGGEST MOVERS <span class=\"dim\">watchlist + scanned names</span>", `<div class="b2"><table>${M.up.map(mrow).join("")}</table><table>${M.down.map(mrow).join("")}</table></div>`)}
+    ${M.mentioned.length ? card("MENTIONED OVERNIGHT", `<table>${M.mentioned.map(mrow).join("")}</table>`) : ""}
+    ${card("PREDICTION MARKET SWINGS <span class=\"dim\">24h</span>", b.predictions.length ? `<table>${b.predictions.map((p) => `<tr><td><a href="${esc(p.url)}" target="_blank" rel="noopener" style="color:var(--text)">${esc(p.event)}</a> <span class="dim">${esc(p.label)}</span></td>
+      <td class="num" style="color:#fff">${Math.round(p.yes * 100)}%</td><td class="num ${cls(p.change)}">${p.change > 0 ? "+" : ""}${(p.change * 100).toFixed(0)}pt</td></tr>`).join("")}</table>` : `<div class="dim">No big swings.</div>`, "wide")}
+    ${card(`UNUSUAL OPTIONS <span class="dim">${esc(O.day || "no scan yet")} · ex-0DTE</span>`, O.top.length ? `<table>${O.top.slice(0, 10).map(optRow).join("")}</table>
+      ${O.hot.length ? `<div class="bline">Volume vs avg: ${O.hot.map((r) => `<span class="chip" data-sym="${esc(r.symbol)}">${esc(r.symbol)} ${r.vol_vs_avg.toFixed(1)}×</span>`).join(" ")}</div>` : ""}
+      ${O.mentioned.length ? `<div class="bline amber">On tickers mentioned overnight:</div><table>${O.mentioned.slice(0, 5).map(optRow).join("")}</table>` : ""}` : `<div class="dim">No unusual options recorded yet.</div>`)}
+    ${card("CONGRESS FILINGS <span class=\"dim\">since close</span>", b.congress.length ? `<table>${b.congress.map((r) => `<tr><td class="party-${esc(r.party)}">${esc(r.member)}</td><td>${chip(r.ticker)}</td>
+      <td class="${r.txn.startsWith("Purchase") ? "up" : "down"}">${esc(r.txn)}</td><td class="dim">${esc(r.amount)}</td></tr>`).join("")}</table>` : `<div class="dim">No new disclosures.</div>`)}
+    ${card("INSIDER BUYS $100K+ <span class=\"dim\">since close</span>", b.insiders.length ? `<table>${b.insiders.map((r) => `<tr><td>${chip(r.ticker)}</td><td>${esc(r.insider)}</td><td class="dim">${esc(r.title)}</td><td class="num up">${esc(r.value)}</td></tr>`).join("")}</table>` : `<div class="dim">None filed.</div>`)}
+  </div>${b.errors.length ? `<div class="note" style="padding:0 10px 10px">Some sections failed: ${esc(b.errors.join(" | "))}</div>` : ""}`;
+}
+
+const GLOBAL_LABELS = { "^N225": "NIKKEI", "^HSI": "HANG SENG", "000001.SS": "SHANGHAI", "^GDAXI": "DAX", "^FTSE": "FTSE 100", "^STOXX50E": "STOXX 50",
+  "YM=F": "DOW FUT", "RTY=F": "R2K FUT" };
 
 /* ============================================================ commands */
 
@@ -605,6 +747,16 @@ function runCommand(raw) {
       return tabWith("pred", rest[0] === "KALSHI" ? { predVenue: "kalshi" } : { predVenue: "poly", ...(rest[0] ? { predTag: rest[0].toLowerCase() } : {}) });
     case "KALSHI": return tabWith("pred", { predVenue: "kalshi" });
     case "TRACK": case "TR": return showTab("track");
+    case "BRIEF": case "BR": case "PRE": return tabWith("brief", { briefDay: "" });
+    case "OPT": case "OPTS": case "FLOW": case "UOA": {
+      const sub = { flowType: "", flowScope: "" };
+      for (const w of rest) {
+        if (w === "CALLS") sub.flowType = "C"; else if (w === "PUTS") sub.flowType = "P";
+        else if (w === "MENTIONED") sub.flowScope = "mentioned"; else if (w === "WATCH") sub.flowScope = "watch";
+        else { sub.flowScope = "sym"; loadChart(w); }
+      }
+      return tabWith("flow", sub);
+    }
     case "IMPACT": case "IMP": return showTab("impact");
     case "STATUS": case "SOURCES": return showTab("status");
     case "ALERTS": setSeg("#fsrc", "alert"); S.fsrc = "alert"; return renderFeed();
@@ -627,11 +779,17 @@ function runCommand(raw) {
       const kw = text.slice(7).trim().toLowerCase();
       S.customAlerts = S.customAlerts.filter((k) => k !== kw); store.set("alerts", S.customAlerts); renderFeed(); return msg(`Removed "${kw}"`);
     }
+    case "MAX": case "MIN": return toggleMax();
     case "MUTE": S.sound = false; return syncToggles();
     case "UNMUTE": S.sound = true; return syncToggles();
   }
   if (/^[A-Z0-9^=.\-]{1,15}$/.test(c)) return loadChart(c, RANGES[rest[0]]);
   msg("Unknown command. Type HELP", true);
+}
+
+function toggleMax() {
+  S.max = !S.max; store.set("max", S.max);
+  $("#grid").classList.toggle("maxbottom", S.max); renderTabs();
 }
 
 function setSeg(sel, v) { $$(sel + " button").forEach((b) => b.classList.toggle("on", b.dataset.v === v)); }
@@ -661,11 +819,14 @@ function bindEvents() {
     if (symEl) { e.stopPropagation(); loadChart(symEl.dataset.sym); return; }
     const post = e.target.closest(".post");
     if (post && !e.target.closest("a")) { post.classList.toggle("open"); selectPost(post.dataset.id); return; }
+    if (e.target.closest("#maxbtn")) { toggleMax(); return; }
     const tab = e.target.closest("#tabs button");
     if (tab) { showTab(tab.dataset.tab); return; }
     const sg = e.target.closest("[data-seg] button");
     if (sg) { S.sub[sg.parentElement.dataset.seg] = sg.dataset.v; renderTab(); return; }
-    const pr = e.target.closest("tr[data-post]");
+    const fs = e.target.closest("tr[data-flowsym]");
+    if (fs) { S.sub.flowScope = "sym"; loadChart(fs.dataset.flowsym).then(renderTab); return; }
+    const pr = e.target.closest("[data-post]");
     if (pr) { selectPost(pr.dataset.post); return; }
     const pp = e.target.closest("tr[data-person]");
     if (pp) { S.fperson = pp.dataset.person; fillPeople(); renderFeed(); }
@@ -699,7 +860,9 @@ async function boot() {
   S.sound = store.get("sound", true);
   S.notify = store.get("notify", false) && "Notification" in window && Notification.permission === "granted";
   S.mkmode = store.get("mkmode", "key");
-  S.tab = store.get("tab", "news");
+  S.tab = store.get("tab", "brief");
+  S.max = store.get("max", false);
+  $("#grid").classList.toggle("maxbottom", S.max);
   setSeg("#mkmode", S.mkmode);
   syncToggles();
   bindEvents();
@@ -715,7 +878,7 @@ async function boot() {
 
   setInterval(refreshQuotes, 15000);
   setInterval(reloadPosts, 90000);                 // pick up impact measurements as they complete
-  setInterval(() => { if (["news", "pred", "status", "track"].includes(S.tab)) renderTab(); }, 60000);
+  setInterval(() => { if (["news", "pred", "status", "track", "flow"].includes(S.tab)) renderTab(); }, 60000);
   setInterval(() => { if (S.range === "1d") loadChart(S.sym); }, 60000);
   window.addEventListener("beforeunload", () => store.set("sym", S.sym));
 }

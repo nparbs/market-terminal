@@ -1,6 +1,6 @@
 @echo off
 cd /d "%~dp0"
-python -c "import fastapi, uvicorn, httpx" 2>nul || (
+python -c "import fastapi, uvicorn, httpx, tzdata" 2>nul || (
   echo Installing dependencies...
   python -m pip install -r requirements.txt
 )

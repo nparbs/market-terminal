@@ -28,7 +28,7 @@ def strip_html(s):
     return re.sub(r"\n{3,}", "\n\n", html.unescape(s)).strip()
 
 
-def parse_time(s):
+def parse_time(s, clamp=True):
     if not s:
         return time.time()
     s = s.strip()
@@ -41,7 +41,8 @@ def parse_time(s):
             return time.time()
     if dt.tzinfo is None:  # feeds without a zone (e.g. Investing.com) publish UTC
         dt = dt.replace(tzinfo=timezone.utc)
-    return min(dt.timestamp(), time.time())
+    # Feeds occasionally carry future-dated items; clamp those (but not calendar events).
+    return min(dt.timestamp(), time.time()) if clamp else dt.timestamp()
 
 
 # ---------------------------------------------------------------- Truth Social

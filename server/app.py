@@ -11,7 +11,7 @@ from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import db, extras, feeds, impact, market
+from . import brief, db, extras, feeds, impact, market, options
 from .tagger import Tagger
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -91,11 +91,55 @@ async def impact_loop():
         await asyncio.sleep(60)
 
 
+def on_unusual(u):
+    """New unusual contract from the scanner: push it to the UI, and alert if it is big and in scope."""
+    o = CFG.get("options", {})
+    mentioned = {t for p in db.recent_posts(500, since=time.time() - o.get("include_mentioned_hours", 24) * 3600)
+                 if p["source"] != "gnews" for t in p["tickers"]}
+    u = {**u, "mentioned": u["symbol"] in mentioned}
+    big = u["premium"] >= o.get("alert_premium", 500_000) and u["vol_oi"] >= o.get("alert_vol_oi", 3)
+    scope = o.get("alert_scope", "mentioned")
+    in_scope = scope == "all" or (scope == "watchlist" and u["symbol"] in CFG["watchlist"]) or u["mentioned"]
+    broadcast({"type": "flow", "item": u, "notify": big and in_scope})
+
+
+async def options_loop():
+    if not CFG.get("options", {}).get("enabled", True):
+        return
+    await asyncio.sleep(10)
+    while True:
+        try:
+            await options.scan(CFG, on_unusual)
+            status["options"] = {"person": "Options scanner", "type": "internal", "ok": True, "last": time.time(),
+                                 "error": f"{len(options.state['errors'])} tickers failed" if options.state["errors"] else None,
+                                 "new": len(options.state["by_symbol"])}
+        except Exception as e:
+            status["options"] = {"person": "Options scanner", "type": "internal", "ok": False,
+                                 "error": str(e)[:150], "last": time.time()}
+        # CBOE data is ~15 min delayed and frozen outside market hours, so scan slowly when closed.
+        await asyncio.sleep(CFG["options"].get("scan_minutes", 10) * 60 if options.market_open_now() else 3600)
+
+
+async def brief_loop():
+    await asyncio.sleep(30)
+    while True:
+        try:
+            if brief.due(CFG, db.get_brief()):
+                b = await brief.build(CFG)
+                db.save_brief(b["day"], b)
+                broadcast({"type": "brief", "day": b["day"], "kind": b["kind"], "headline": b["headline"]})
+        except Exception as e:
+            status["brief"] = {"person": "Brief scheduler", "type": "internal", "ok": False, "error": str(e)[:150], "last": time.time()}
+        await asyncio.sleep(30)
+
+
 @asynccontextmanager
 async def lifespan(app):
     db.conn()
     tasks = [asyncio.create_task(poll_loop(s)) for s in CFG["sources"] if s.get("enabled", True)]
     tasks.append(asyncio.create_task(impact_loop()))
+    tasks.append(asyncio.create_task(options_loop()))
+    tasks.append(asyncio.create_task(brief_loop()))
     yield
     for t in tasks:
         t.cancel()
@@ -129,6 +173,7 @@ async def config():
         "alert_keywords": CFG.get("alert_keywords", []),
         "categories": [r["name"] for r in CFG.get("rules", [])],
         "x_enabled": bool(X_TOKEN),
+        "brief_time": CFG.get("brief", {}).get("time_et", "08:30"),
     }
 
 
@@ -199,6 +244,43 @@ async def predictions(venue: str = "poly", tag: str = "economy"):
     return await safe(extras.polymarket)(tag)
 
 
+@app.get("/api/options/flow")
+async def options_flow(symbol: str | None = None):
+    data = options.flow(symbol.upper() if symbol else None)
+    o = CFG.get("options", {})
+    mentioned = {t for p in db.recent_posts(500, since=time.time() - o.get("include_mentioned_hours", 24) * 3600)
+                 if p["source"] != "gnews" for t in p["tickers"]}
+    for u in data["unusual"]:
+        u["mentioned"] = u["symbol"] in mentioned
+    for r in data["summary"]:
+        r["mentioned"] = r["symbol"] in mentioned
+    data["universe_size"] = len(options.universe(CFG))
+    return data
+
+
+@app.post("/api/options/scan")
+async def options_scan():
+    if not options.state["scanning"]:
+        asyncio.create_task(options.scan(CFG, on_unusual))
+    return {"ok": True}
+
+
+@app.get("/api/brief")
+async def get_brief(day: str | None = None, refresh: bool = False):
+    async def run():
+        if refresh:
+            b = await brief.build(CFG)
+            db.save_brief(b["day"], b)
+            return b
+        return db.get_brief(day) or {"empty": True}
+    return await safe(run)()
+
+
+@app.get("/api/brief/days")
+async def brief_days():
+    return db.brief_days()
+
+
 @app.get("/api/trackrecord")
 async def trackrecord():
     return impact.track_record(BENCH)
@@ -231,5 +313,6 @@ async def stream():
 
 
 if __name__ == "__main__":
-    print(f"\n  MARKET TERMINAL  ->  http://127.0.0.1:{CFG.get('port', 8765)}\n")
-    uvicorn.run(app, host="127.0.0.1", port=CFG.get("port", 8765), log_level="warning")
+    port = int(os.environ.get("PORT") or CFG.get("port", 8765))
+    print(f"\n  MARKET TERMINAL  ->  http://127.0.0.1:{port}\n")
+    uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")

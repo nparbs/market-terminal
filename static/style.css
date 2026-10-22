@@ -168,3 +168,26 @@ tr.past td { opacity: .55; } tr.next td { background: #15110a; }
 
 .tabbody td { white-space: nowrap; }
 .tabbody td.wrap { white-space: normal; min-width: 260px; }
+
+/* ---------- extended hours, options flow, brief ---------- */
+.ext { font-size: 10px; }
+.tabdot { color: var(--alert); margin-left: 4px; }
+.flowgrid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 1px; background: var(--line); height: 100%; }
+.fcol { background: var(--panel); overflow: auto; min-height: 0; }
+.bhead { padding: 8px 12px; color: var(--amber); font-size: 14px; font-weight: 600; border-bottom: 1px solid var(--line); }
+.bcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 8px; padding: 8px; }
+.bcard { border: 1px solid var(--line2); background: #050607; padding: 7px 9px; min-width: 0; }
+.bcard.wide { grid-column: span 2; }
+.bcard h4 { margin: 0 0 6px; color: var(--amber); font-size: 11px; letter-spacing: .5px; }
+.bcard td { padding: 2px 4px; border-bottom: 0; white-space: nowrap; }
+.bcard table { width: 100%; }
+.bstat { margin-bottom: 4px; } .bline { margin: 4px 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.balert { padding: 5px 0; border-top: 1px solid var(--line); white-space: normal; }
+.balert:hover { background: var(--hl); }
+.b2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+@media (max-width: 1100px) { .bcard.wide { grid-column: auto; } .flowgrid { grid-template-columns: 1fr; height: auto; } }
+#tabs { align-items: stretch; }
+#maxbtn { color: var(--amber) !important; border-left: 1px solid var(--line) !important; border-right: 0 !important; }
+#grid.maxbottom { grid-template-rows: 0 minmax(0, 1fr); }
+#grid.maxbottom #chartp { display: none; }
+.flowgrid th, .flowgrid td { padding: 3px 5px; }

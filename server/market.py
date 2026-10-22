@@ -49,6 +49,15 @@ async def quote(sym):
         price = m.get("regularMarketPrice") or (closes[-1] if closes else None)
         prev = m.get("chartPreviousClose") or m.get("previousClose")
         chg = (price - prev) if (price is not None and prev) else None
+        # Pre/post-market: the last extended-hours bar vs the regular-session price.
+        ext = None
+        reg = (m.get("currentTradingPeriod") or {}).get("regular") or {}
+        bars = _bars(res)
+        if bars and reg and m.get("instrumentType") in ("EQUITY", "ETF") and price:
+            last = bars[-1]
+            if last["time"] >= reg.get("end", 1e12) or last["time"] < reg.get("start", 0):
+                ext = {"session": "post" if last["time"] >= reg.get("end", 1e12) else "pre",
+                       "price": last["close"], "pct": (last["close"] / price - 1) * 100, "time": last["time"]}
         return {
             "symbol": sym,
             "name": m.get("shortName") or m.get("longName") or sym,
@@ -63,6 +72,7 @@ async def quote(sym):
             "exchange": m.get("fullExchangeName") or m.get("exchangeName"),
             "spark": closes[-78:],
             "time": m.get("regularMarketTime"),
+            "ext": ext,
         }
     try:
         return await _cached(("q", sym), 12, fetch)

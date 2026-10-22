@@ -33,6 +33,17 @@ def conn():
             );
             CREATE INDEX IF NOT EXISTS posts_ts ON posts(ts DESC);
             CREATE INDEX IF NOT EXISTS posts_person ON posts(person);
+
+            CREATE TABLE IF NOT EXISTS options_daily (   -- one row per ticker per trading day (latest scan wins)
+                day TEXT, symbol TEXT, call_vol INTEGER, put_vol INTEGER, call_prem REAL, put_prem REAL,
+                call_oi INTEGER, put_oi INTEGER, iv30 REAL, PRIMARY KEY (day, symbol)
+            );
+            CREATE TABLE IF NOT EXISTS options_unusual (
+                day TEXT, contract TEXT, symbol TEXT, premium REAL, data TEXT, PRIMARY KEY (day, contract)
+            );
+            CREATE TABLE IF NOT EXISTS briefs (
+                day TEXT PRIMARY KEY, ts INTEGER, data TEXT
+            );
             """
         )
     return _conn
@@ -116,3 +127,73 @@ def posts_with_impact(person=None):
 def persons():
     with _lock:
         return [r[0] for r in conn().execute("SELECT DISTINCT person FROM posts ORDER BY person").fetchall()]
+
+
+# ---------------------------------------------------------------- options flow
+
+def save_options_day(day, sym, t):
+    with _lock:
+        conn().execute(
+            "INSERT OR REPLACE INTO options_daily VALUES (?,?,?,?,?,?,?,?,?)",
+            (day, sym, t["call_vol"], t["put_vol"], t["call_prem"], t["put_prem"], t["call_oi"], t["put_oi"], t.get("iv30")),
+        )
+        conn().commit()
+
+
+def avg_options_volume(sym, before_day, n=20):
+    """Average total contract volume over the previous n trading days we have recorded."""
+    with _lock:
+        rows = conn().execute(
+            "SELECT call_vol + put_vol FROM options_daily WHERE symbol = ? AND day < ? ORDER BY day DESC LIMIT ?",
+            (sym, before_day, n),
+        ).fetchall()
+    vals = [r[0] for r in rows if r[0]]
+    return (sum(vals) / len(vals), len(vals)) if vals else (None, 0)
+
+
+def save_unusual(day, items):
+    with _lock:
+        conn().executemany(
+            "INSERT OR REPLACE INTO options_unusual VALUES (?,?,?,?,?)",
+            [(day, i["contract"], i["symbol"], i["premium"], json.dumps(i)) for i in items],
+        )
+        conn().commit()
+
+
+def unusual_for_day(day, limit=200):
+    with _lock:
+        rows = conn().execute(
+            "SELECT data FROM options_unusual WHERE day = ? ORDER BY premium DESC LIMIT ?", (day, limit)
+        ).fetchall()
+    return [json.loads(r[0]) for r in rows]
+
+
+def last_options_day(before=None):
+    q, args = "SELECT MAX(day) FROM options_unusual", []
+    if before:
+        q += " WHERE day < ?"; args.append(before)
+    with _lock:
+        r = conn().execute(q, args).fetchone()
+    return r[0] if r else None
+
+
+# ---------------------------------------------------------------- briefs
+
+def save_brief(day, brief):
+    with _lock:
+        conn().execute("INSERT OR REPLACE INTO briefs VALUES (?,?,?)", (day, int(brief["ts"]), json.dumps(brief)))
+        conn().commit()
+
+
+def get_brief(day=None):
+    with _lock:
+        if day:
+            r = conn().execute("SELECT data FROM briefs WHERE day = ?", (day,)).fetchone()
+        else:
+            r = conn().execute("SELECT data FROM briefs ORDER BY day DESC LIMIT 1").fetchone()
+    return json.loads(r[0]) if r else None
+
+
+def brief_days(limit=30):
+    with _lock:
+        return [r[0] for r in conn().execute("SELECT day FROM briefs ORDER BY day DESC LIMIT ?", (limit,)).fetchall()]

@@ -10,6 +10,30 @@
 
   "impact_benchmark": "SPY",
 
+  "options": {
+    "enabled": true,
+    "scan_minutes": 10,
+    "universe": ["SPY", "QQQ", "IWM", "DIA", "TLT", "GLD", "SLV", "USO", "FXI", "KWEB", "SMH", "XLE", "XLF",
+                 "AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "META", "GOOGL", "AMD", "AVGO", "TSM", "MU", "INTC", "ARM",
+                 "PLTR", "COIN", "MSTR", "HOOD", "NFLX", "JPM", "BA", "XOM", "BABA", "SMCI", "UBER", "DJT"],
+    "include_watchlist": true,
+    "include_mentioned_hours": 24,
+    "min_volume": 500,
+    "min_premium": 100000,
+    "min_vol_oi": 1.5,
+    "alert_premium": 500000,
+    "alert_vol_oi": 3,
+    "alert_scope": "mentioned"
+  },
+
+  "brief": {
+    "enabled": true,
+    "time_et": "08:30",
+    "futures": ["ES=F", "NQ=F", "YM=F", "RTY=F", "^VIX", "^TNX", "DX-Y.NYB", "CL=F", "GC=F", "BTC-USD", "EURUSD=X", "USDJPY=X"],
+    "global": ["^N225", "^HSI", "000001.SS", "^GDAXI", "^FTSE", "^STOXX50E"],
+    "poly_tags": ["economy", "fed-rates", "tariffs", "geopolitics", "politics"]
+  },
+
   "sources": [
     {"type": "truth", "person": "Donald Trump", "handle": "realDonaldTrump", "id": "107780257626128497", "interval": 45, "enabled": true},
     {"type": "truth", "person": "White House", "handle": "WhiteHouse", "id": "113686491998750334", "interval": 60, "enabled": true},

@@ -45,6 +45,35 @@
 - [x] Market news wire (CNBC, MarketWatch, Investing) plus per-ticker Yahoo headlines
 - [x] Source-health tab
 
+## Done (v0.2)
+
+### Pre-market brief
+- [x] Built automatically each weekday at a configurable ET time; stored per day with history
+- [x] Desktop notification and a BRIEF tab badge when it's ready; `BRIEF` command; BUILD NOW button
+- [x] Headline line: futures, VIX, 10Y, oil, BTC, alert count, key releases
+- [x] Overnight direct posts by person and topic, with alert posts in full
+- [x] Futures, macro and global indexes (Nikkei, Hang Seng, Shanghai, DAX, FTSE, Stoxx 50)
+- [x] Pre-market movers across the watchlist, the options universe and mentioned tickers
+- [x] Calendar: today's releases, or the next session's after the close
+- [x] Biggest 24h prediction-market swings (Polymarket + Kalshi), with stale and near-certain markets filtered out
+- [x] Last session's unusual options (excluding 0DTE), volume vs average, flow on mentioned tickers
+- [x] Congress disclosures and $100K+ insider buys filed since the close
+
+### Unusual options activity
+- [x] Scanner using CBOE's free delayed chains: universe + watchlist + tickers mentioned in the last 24h
+- [x] Unusual = volume, premium and vol/OI thresholds (configurable); score ranks by vol/OI and premium
+- [x] Estimated fill side (ASK/BID/MID) and bull/bear lean; DTE, IV, delta, % OTM
+- [x] Per-ticker summary: put/call ratio, call/put premium, IV30 and change, volume vs recorded average
+- [x] Daily totals and unusual contracts stored for history
+- [x] OPT FLOW tab: scope / type / 0DTE / min-premium filters and sort options; RESCAN button; `OPT` command
+- [x] Live alerts for big unusual contracts on tickers that were just mentioned in a post
+
+### Other
+- [x] Pre-market and after-hours moves in the watchlist and chart header
+- [x] Maximize toggle for the bottom panel (`MAX`)
+- [x] `PORT` environment override for running a second copy
+- [x] Fixed: calendar events were being clamped to "now"; timezone-less RSS timestamps are now read as UTC
+
 ---
 
 ## Next up
@@ -64,9 +93,13 @@
 - [ ] Earnings calendar plus earnings-time markers on the chart
 
 ### Signals and analytics
-- [ ] Pre-market brief at 8:30 ET: overnight posts, futures, today's data releases, biggest prediction-market swings
 - [ ] Prediction-market swing alerts, e.g. rate-cut odds move more than 10 points in an hour
-- [ ] Unusual options activity on tickers that were just mentioned (needs a paid feed)
+- [ ] Closing brief at 16:15 ET: the day's biggest post reactions, options flow summary, after-hours movers
+- [ ] Send the brief to phone or email (ntfy / Telegram / SMTP)
+- [ ] Options: trade-level flow (sweeps, blocks) from a paid feed (Polygon, Unusual Whales, Tradier)
+- [ ] Options: track whether flagged contracts paid off (next-day OI change, price move) to score the signal
+- [ ] Options: IV-rank and skew history per ticker; flag IV spikes right after a post
+- [ ] Options: mark unusual contracts on the price chart
 - [ ] Congress and insider cross-check: flag trades in tickers that were recently mentioned in posts
 - [ ] Topic heatmap: which topics moved which sectors most
 - [ ] Optional AI tagging (Claude API) for sentiment, urgency and better ticker detection, with the keyword tagger kept as a fallback

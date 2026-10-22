@@ -195,7 +195,7 @@ async def calendar():
         for e in r.json():
             out.append({"title": e.get("title"), "country": e.get("country"), "impact": e.get("impact"),
                         "forecast": e.get("forecast"), "previous": e.get("previous"),
-                        "actual": e.get("actual"), "ts": parse_time(e.get("date"))})
+                        "actual": e.get("actual"), "ts": parse_time(e.get("date"), clamp=False)})
         out.sort(key=lambda x: x["ts"])
         return out
     return await _cached(("cal",), 900, fetch)
