@@ -74,6 +74,32 @@
 - [x] `PORT` environment override for running a second copy
 - [x] Fixed: calendar events were being clamped to "now"; timezone-less RSS timestamps are now read as UTC
 
+## Done (v0.3)
+
+### Database
+- [x] Settings table: watchlist, custom alerts, theme, layout and command history are saved server-side (migrated from browser storage)
+- [x] Alert log of every post, options and brief alert
+- [x] Archives: news headlines, congress trades, insider trades (with SEC links), hourly prediction-market snapshots
+- [x] Full-text post search (`FIND`, feed search box) and news archive search
+- [x] Database stats in Settings and the SOURCES tab; `MT_DB` override
+
+### Customisable UI
+- [x] Drag-to-resize panels (watchlist, feed, chart/bottom split), saved per user
+- [x] Show or hide any panel or the ticker tape; swap sides; reset layout
+- [x] 8 dark themes + custom accent color; 4 up/down palettes including colorblind-friendly
+- [x] Text size, dense rows, compact feed, ticker tape speed
+- [x] Settings drawer (⚙ / `SETTINGS`) with watchlist and alert keyword management
+
+### Search and watchlist
+- [x] Command-bar autocomplete: commands, history, people, themes, local and Yahoo ticker search
+- [x] Keyboard navigation (↑↓ / Tab / Enter / Esc)
+- [x] + WATCH buttons in the chart header and search results; ✕ on watchlist rows
+
+### Links
+- [x] ALERTS tab with links to source posts, option contracts and briefs
+- [x] Links on brief alerts, congress members, insider filings, options contracts, track-record moves, the calendar
+- [x] Clicking the alert in the top bar jumps to it
+
 ---
 
 ## Next up
@@ -106,8 +132,10 @@
 
 ### Terminal UX
 - [ ] Multiple chart panes, or a compare overlay (e.g. NVDA vs SMH vs SPY)
-- [ ] Pop-out panels and saved layouts
-- [ ] Edit topics and keywords in the UI instead of `config.json`
+- [ ] Pop-out panels, multiple named layouts, drag-to-reorder watchlist
+- [ ] Edit topics, sources and options thresholds in the UI instead of `config.json`
+- [ ] Prediction-market history charts from the stored snapshots
+- [ ] Watchlist groups / multiple watchlists
 - [ ] Mark a post's exact time on intraday charts with a vertical line
 - [ ] Export the track record to CSV
 

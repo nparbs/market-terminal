@@ -51,12 +51,16 @@ async def quote(sym):
         chg = (price - prev) if (price is not None and prev) else None
         # Pre/post-market: the last extended-hours bar vs the regular-session price.
         ext = None
-        reg = (m.get("currentTradingPeriod") or {}).get("regular") or {}
+        period = m.get("currentTradingPeriod") or {}
+        reg = period.get("regular") or {}
+        pre_start = (period.get("pre") or {}).get("start", 0)
         bars = _bars(res)
         if bars and reg and m.get("instrumentType") in ("EQUITY", "ETF") and price:
             last = bars[-1]
             if last["time"] >= reg.get("end", 1e12) or last["time"] < reg.get("start", 0):
-                ext = {"session": "post" if last["time"] >= reg.get("end", 1e12) else "pre",
+                # Bars before today's pre-market opens are still yesterday's after-hours session.
+                pre = reg.get("start", 0) > last["time"] >= pre_start
+                ext = {"session": "pre" if pre else "post",
                        "price": last["close"], "pct": (last["close"] / price - 1) * 100, "time": last["time"]}
         return {
             "symbol": sym,
@@ -100,3 +104,22 @@ async def candles(sym, rng="5d", interval=None):
 
 async def close():
     await _client.aclose()
+
+
+SEARCH_TYPES = {"EQUITY", "ETF", "INDEX", "FUTURE", "CRYPTOCURRENCY", "CURRENCY", "MUTUALFUND"}
+
+
+async def search(q):
+    """Ticker search for the command bar (Yahoo Finance autocomplete)."""
+    q = q.strip()
+    if not q:
+        return []
+
+    async def fetch():
+        r = await _client.get("https://query2.finance.yahoo.com/v1/finance/search",
+                              params={"q": q, "quotesCount": 10, "newsCount": 0, "listsCount": 0})
+        r.raise_for_status()
+        return [{"symbol": x["symbol"], "name": x.get("shortname") or x.get("longname") or "",
+                 "type": x.get("quoteType"), "exchange": x.get("exchDisp")}
+                for x in r.json().get("quotes", []) if x.get("symbol") and x.get("quoteType") in SEARCH_TYPES]
+    return await _cached(("search", q.lower()), 3600, fetch)

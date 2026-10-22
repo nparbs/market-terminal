@@ -4,6 +4,7 @@ import asyncio
 import html
 import json
 import re
+from urllib.parse import quote
 
 from .feeds import client, parse_feed, parse_time
 from .market import _cached
@@ -34,6 +35,9 @@ async def congress(ticker=None, member=None):
                 "member": r_[5], "chamber": r_[6], "party": r_[7],
                 "filed": str(r_[8])[:10], "traded": str(r_[9])[:10],
                 "excess_return": r_[12] if len(r_) > 12 and isinstance(r_[12], (int, float)) else None,
+                "id": str(r_[11]) if len(r_) > 11 else f"{r_[5]}|{r_[0]}|{r_[9]}|{r_[3]}|{r_[4]}",
+                "member_url": (f"https://www.quiverquant.com/congresstrading/politician/{quote(str(r_[5]))}-{r_[15]}"
+                               if len(r_) > 15 and r_[15] else None),
             })
         return out
 
@@ -53,6 +57,11 @@ OI_PAGES = {
     "cluster": "http://openinsider.com/latest-cluster-buys",
     "big": "http://openinsider.com/latest-insider-purchases-100k",
 }
+
+
+def _href(row, pattern, prefix=""):
+    m = re.search(pattern, row)
+    return prefix + m.group(1) if m else None
 
 
 def _cell(c):
@@ -87,6 +96,8 @@ async def insiders(mode="latest", ticker=None):
                 "title": g("title") or g("industry"), "type": g("tradetype"), "price": g("price"),
                 "qty": g("qty"), "owned": g("owned"), "delta_own": g("δown"),
                 "value": g("value"),
+                "filing_url": _href(row, r'href="(https?://www\.sec\.gov/[^"]+)"'),
+                "insider_url": _href(row, r'href="(/insider/[^"]+)"', "http://openinsider.com"),
             })
         return out
 

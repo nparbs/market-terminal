@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, Query
+from fastapi import Body, FastAPI
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -19,6 +19,13 @@ CFG = json.loads((ROOT / "config.json").read_text(encoding="utf8"))
 X_TOKEN = os.environ.get("X_BEARER_TOKEN") or CFG.get("x_bearer_token") or ""
 BENCH = CFG.get("impact_benchmark", "SPY")
 tagger = Tagger(CFG)
+
+
+def apply_settings(s):
+    """Settings saved from the UI (stored in SQLite) override config.json where they overlap."""
+    if isinstance(s.get("watchlist"), list) and s["watchlist"]:
+        CFG["watchlist"] = [str(x).upper() for x in s["watchlist"]][:200]
+        tagger.watchlist = set(CFG["watchlist"])
 
 subscribers: set[asyncio.Queue] = set()
 status: dict[str, dict] = {}
@@ -69,6 +76,9 @@ async def poll_loop(src):
                     fresh.append(p)
             for p in sorted(fresh, key=lambda x: x["ts"]):
                 p["notify"] = p["alert"] and time.time() - p["ts"] < FRESH_SECONDS
+                if p["notify"]:
+                    db.log_alert("post", f"{p['person']} ({p['source']})", p["text"][:500], p.get("url"), p["id"],
+                                 ",".join(p["tickers"][:6]), p["ts"])
                 broadcast({"type": "post", "post": p})
             st.update(ok=True, last=time.time(), error=None, new=st["new"] + len(fresh))
         except Exception as e:
@@ -100,6 +110,11 @@ def on_unusual(u):
     big = u["premium"] >= o.get("alert_premium", 500_000) and u["vol_oi"] >= o.get("alert_vol_oi", 3)
     scope = o.get("alert_scope", "mentioned")
     in_scope = scope == "all" or (scope == "watchlist" and u["symbol"] in CFG["watchlist"]) or u["mentioned"]
+    if big and in_scope:
+        db.log_alert("flow", f"Unusual options: {u['symbol']} {u['exp'][5:]} {u['strike']:g}{u['type']}",
+                     f"${u['premium']:,.0f} premium · {u['volume']:,} contracts ({u['vol_oi']}x OI) · {u['fill']}"
+                     + (f" · leans {u['lean']}" if u["lean"] else "") + (" · mentioned in a post" if u["mentioned"] else ""),
+                     f"https://finance.yahoo.com/quote/{u['contract']}/", u["contract"], u["symbol"])
     broadcast({"type": "flow", "item": u, "notify": big and in_scope})
 
 
@@ -127,19 +142,59 @@ async def brief_loop():
             if brief.due(CFG, db.get_brief()):
                 b = await brief.build(CFG)
                 db.save_brief(b["day"], b)
+                db.log_alert("brief", b["kind"], b["headline"], None, b["day"])
                 broadcast({"type": "brief", "day": b["day"], "kind": b["kind"], "headline": b["headline"]})
         except Exception as e:
             status["brief"] = {"person": "Brief scheduler", "type": "internal", "ok": False, "error": str(e)[:150], "last": time.time()}
         await asyncio.sleep(30)
 
 
+async def archive_loop():
+    """Keep a permanent history of the side-panel data that the free sources only show briefly."""
+    await asyncio.sleep(45)
+    n = 0
+    while True:
+        try:
+            items = await market._cached(("news",), 120, lambda: feeds.fetch_news(CFG["news_feeds"]))
+            for it in items:
+                it["tickers"] = tagger.tag(it["title"])["tickers"]
+            db.archive_news(items)
+            for sym in CFG["watchlist"][:25]:
+                if options.optionable(sym):
+                    try:
+                        tn = await market._cached(("tn", sym), 900, lambda s=sym: feeds.ticker_news(s))
+                        db.archive_news([{**t, "tickers": [sym]} for t in tn])
+                    except Exception:
+                        pass
+            if n % 3 == 0:
+                db.archive_congress(await extras.congress())
+                for mode in ("latest", "buys", "big", "cluster"):
+                    db.archive_insiders(await extras.insiders(mode))
+            if n % 6 == 0:
+                rows = []
+                for tag in CFG.get("brief", {}).get("poly_tags", ["economy"]):
+                    for e in await extras.polymarket(tag):
+                        rows += [{"venue": "Polymarket", "event": e["title"], "label": m["label"], "yes": m["yes"]} for m in e["markets"]]
+                for e in await extras.kalshi():
+                    rows += [{"venue": "Kalshi", "event": e["title"], "label": m["label"], "yes": m["yes"]} for m in e["markets"]]
+                db.snapshot_predictions(rows)
+            status["archive"] = {"person": "Database archiver", "type": "internal", "ok": True, "last": time.time(), "error": None}
+        except Exception as e:
+            status["archive"] = {"person": "Database archiver", "type": "internal", "ok": False, "last": time.time(),
+                                 "error": f"{type(e).__name__}: {str(e)[:150]}"}
+        n += 1
+        await asyncio.sleep(600)
+
+
 @asynccontextmanager
 async def lifespan(app):
     db.conn()
+    apply_settings(db.get_settings())
     tasks = [asyncio.create_task(poll_loop(s)) for s in CFG["sources"] if s.get("enabled", True)]
     tasks.append(asyncio.create_task(impact_loop()))
     tasks.append(asyncio.create_task(options_loop()))
     tasks.append(asyncio.create_task(brief_loop()))
+    tasks.append(asyncio.create_task(archive_loop()))
     yield
     for t in tasks:
         t.cancel()
@@ -169,6 +224,7 @@ async def index():
 async def config():
     return {
         "watchlist": CFG["watchlist"], "tape": CFG["tape"], "benchmark": BENCH,
+        "options_universe": CFG.get("options", {}).get("universe", []),
         "people": sorted({s["person"] for s in CFG["sources"] if s.get("enabled", True)} | set(db.persons())),
         "alert_keywords": CFG.get("alert_keywords", []),
         "categories": [r["name"] for r in CFG.get("rules", [])],
@@ -179,8 +235,8 @@ async def config():
 
 @app.get("/api/posts")
 async def posts(limit: int = 200, person: str | None = None, ticker: str | None = None,
-                alerts: bool = False, since: int | None = None):
-    return db.recent_posts(min(limit, 1000), person, ticker, since, alerts)
+                alerts: bool = False, since: int | None = None, q: str | None = None):
+    return db.recent_posts(min(limit, 1000), person, ticker, since, alerts, q)
 
 
 @app.get("/api/post/{pid:path}")
@@ -223,12 +279,16 @@ async def calendar():
 
 
 @app.get("/api/congress")
-async def congress(ticker: str | None = None, member: str | None = None):
+async def congress(ticker: str | None = None, member: str | None = None, archive: bool = False):
+    if archive:
+        return db.search_congress(ticker, member)
     return await safe(extras.congress)(ticker, member)
 
 
 @app.get("/api/insiders")
 async def insiders(mode: str = "latest", ticker: str | None = None):
+    if mode == "archive":
+        return db.search_insiders(ticker.upper() if ticker else None)
     return await safe(extras.insiders)(mode, ticker.upper() if ticker else None)
 
 
@@ -279,6 +339,40 @@ async def get_brief(day: str | None = None, refresh: bool = False):
 @app.get("/api/brief/days")
 async def brief_days():
     return db.brief_days()
+
+
+@app.get("/api/settings")
+async def get_settings():
+    saved = db.get_settings()
+    return {"watchlist": CFG["watchlist"], **saved, "_saved": list(saved)}
+
+
+@app.put("/api/settings")
+async def put_settings(values: dict = Body(...)):
+    allowed = {k: v for k, v in values.items() if k in ("watchlist", "custom_alerts", "ui", "history", "mkmode", "tab", "sym")}
+    db.put_settings(allowed)
+    apply_settings(allowed)
+    return {"ok": True}
+
+
+@app.get("/api/search")
+async def search(q: str):
+    return await safe(market.search)(q)
+
+
+@app.get("/api/alerts")
+async def alerts(limit: int = 300, kind: str | None = None):
+    return db.alert_log(min(limit, 2000), kind)
+
+
+@app.get("/api/news/archive")
+async def news_archive(q: str | None = None, ticker: str | None = None, limit: int = 300):
+    return db.search_news(q, ticker, min(limit, 2000))
+
+
+@app.get("/api/db/stats")
+async def db_stats():
+    return db.stats()
 
 
 @app.get("/api/trackrecord")

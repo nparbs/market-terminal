@@ -27,7 +27,22 @@ Then open http://127.0.0.1:8765. Use 127.0.0.1 rather than `localhost`. `localho
 | Market movers | Live feed. Each post shows ticker chips (click one to chart it), topic tags, and SPY/ticker moves at +5, +30 and +60 minutes |
 | Bottom tabs | Brief, News, Economic Calendar, Options Flow, Congress trades, Insider trades (Form 4), Polymarket/Kalshi, Track Record, Post Impact, 13F filings, Source health, Help. `MAX` (or the ⤢ button) hides the chart so the tab fills the space |
 
-Type a ticker anywhere to chart it. Type `HELP` for all commands, for example `NVDA 1Y`, `ADD PLTR`, `BRIEF`, `OPT NVDA`, `OPT MENTIONED`, `CONG NVDA`, `INS BUYS`, `KALSHI`, `FEED TRUMP` and `ALERT nvidia`. `Alt+1`…`Alt+0` switch tabs.
+### Search and commands
+
+Start typing anywhere and the command bar opens a search dropdown with matching commands, your recent commands, and tickers. Ticker matches come from your watchlist and Yahoo Finance search, so typing `nvid` or `palantir` works. Use ↑/↓ to pick a result, Tab to complete it, and Enter to run it. Every ticker result has a **+ WATCH** button. The chart header has the same button, and each watchlist row has a ✕ on hover to remove it.
+
+### Customising the layout
+
+Open **⚙ Settings** (or type `SETTINGS`) to change:
+- **Theme:** 8 dark themes: Bloomberg Amber, Phosphor Green, Midnight Blue, Synthwave, Crimson, Arctic Cyan, Graphite Mono, OLED Gold. You can also set a custom accent color.
+- **Up/down colors:** green/red, blue/orange (colorblind-friendly), red-up (Asian convention) or mono.
+- **Display:** text size, ticker tape speed, dense rows, compact feed.
+- **Panels:** show or hide the watchlist, chart, feed, bottom tabs or ticker tape, or swap sides so the feed is on the left.
+- **Watchlist and custom alert keywords.**
+
+To resize panels, drag the borders between them. `LAYOUT` resets the layout, and `THEME <name>` switches themes from the command bar.
+
+Type a ticker anywhere to chart it. Type `HELP` for all commands, for example `NVDA 1Y`, `ADD PLTR`, `FIND tariff`, `ALERTS`, `THEME midnight`, `BRIEF`, `OPT NVDA`, `OPT MENTIONED`, `CONG NVDA`, `INS BUYS`, `KALSHI`, `FEED TRUMP` and `ALERT nvidia`. `Alt+1`…`Alt+0` switch tabs.
 
 ## Alerts
 
@@ -38,6 +53,41 @@ A new post triggers an alert (sound, red flash and optional desktop notification
 News-coverage sources (the NEWS badge) don't trigger alerts by default, because they mention companies constantly. To change that, set `"alerts": true` on that source.
 
 Click **🔔 NOTIFY** once to allow desktop notifications. They work while the tab is in the background.
+
+## Alert history and links
+
+The **ALERTS** tab lists every alert the terminal has fired: posts, options flow and briefs. Each row links to its source:
+- the original post on Truth Social, X or the official site,
+- the option contract on Yahoo Finance,
+- or the brief.
+
+Links also appear in other places:
+- the feed (↗),
+- brief alert posts,
+- congress members (their Quiver Quant page),
+- insider trades (the SEC Form 4 filing and the insider's OpenInsider page),
+- unusual-options rows,
+- the track record's biggest moves,
+- 13F filings, prediction markets and the calendar.
+
+Clicking the alert message in the top bar jumps to the alert.
+
+## Database
+
+Everything is stored in SQLite at `data/terminal.db`:
+
+| Table | Contents |
+|---|---|
+| `posts` | Every collected post with tags and impact measurements (searchable with `FIND` or the feed's search box) |
+| `alerts_log` | Every alert fired |
+| `news` | Every headline seen (NEWS → ARCHIVE to search) |
+| `congress_trades`, `insider_trades` | Permanent archive of disclosures (ARCHIVE mode in those tabs) |
+| `prediction_snapshots` | Hourly Polymarket and Kalshi odds, for history |
+| `options_daily`, `options_unusual` | Options flow history |
+| `briefs` | Every brief |
+| `settings` | Watchlist, custom alerts, theme, layout and command history. These sync to any browser that opens the terminal |
+
+A background archiver saves news every 10 minutes, congress and insider trades every 30 minutes, and prediction odds every hour. Row counts appear in **⚙ Settings → Database** and the SOURCES tab. Set `MT_DB` to use a different database file.
 
 ## Pre-market brief
 

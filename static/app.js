@@ -108,8 +108,8 @@ function renderWatch(prev = {}) {
           <div class="wname">${esc(q.error ? "no data" : q.name || "")}</div></td>
       <td class="num">${fmtPx(q.price, s)}</td>
       <td class="num ${cls(q.pct)}">${fmtPct(q.pct)}${q.ext ? `<div class="ext ${cls(q.ext.pct)}">${q.ext.session === "pre" ? "PRE" : "AH"} ${fmtPct(q.ext.pct)}</div>` : ""}</td>
-      <td>${spark(q.spark, (q.pct || 0) >= 0)}</td></tr>`;
-  }).join("") || `<tr><td colspan="4" class="empty">Empty. Type ADD NVDA</td></tr>`;
+      <td class="spk">${spark(q.spark, (q.pct || 0) >= 0)}</td><td><span class="wdel" data-wdel="${esc(s)}" title="Remove from watchlist">✕</span></td></tr>`;
+  }).join("") || `<tr><td colspan="5" class="empty">Empty. Search a ticker above and press + WATCH.</td></tr>`;
 }
 
 function renderTape() {
@@ -125,7 +125,7 @@ let chart, candles, volume;
 
 function initChart() {
   const LC = window.LightweightCharts;
-  chart = LC.createChart($("#chart"), {
+  chart = LC.createChart($("#chart"), {  // colours are replaced by applyChartTheme() from ui.js
     autoSize: true,
     layout: { background: { type: "solid", color: "#000" }, textColor: "#8b949e", fontFamily: "IBM Plex Mono, Consolas, monospace", fontSize: 11 },
     grid: { vertLines: { color: "#0d1013" }, horzLines: { color: "#0d1013" } },
@@ -169,8 +169,10 @@ async function loadChart(sym, range) {
   S.gmt = d.gmtoffset || 0;
   S.bars = d.bars;
   candles.setData(d.bars.map((b) => ({ time: b.time + S.gmt, open: b.open, high: b.high, low: b.low, close: b.close })));
-  volume.setData(d.bars.map((b) => ({ time: b.time + S.gmt, value: b.volume, color: b.close >= b.open ? "#123d29" : "#4a1a1b" })));
+  applyChartTheme();
   chart.timeScale().fitContent();
+  saveSetting("sym", S.sym);
+  renderWatchBtn();
   $("#cname").textContent = d.name || "";
   renderChartHead();
   updateMarkers();
@@ -210,7 +212,7 @@ function updateMarkers() {
     const alert = ps.some(isAlert), sel = ps.some((p) => p.id === S.sel);
     const initials = [...new Set(ps.map((p) => p.person.split(/\s+/).map((w) => w[0]).join("").slice(0, 2)))].join(",");
     return { time: +t, position: "aboveBar", shape: "arrowDown", size: sel ? 2 : 1,
-      color: sel ? "#ffa028" : alert ? "#ff3b3b" : personColor(ps[0].person), text: initials + (ps.length > 1 ? `×${ps.length}` : "") };
+      color: sel ? cssVar("amber") : alert ? "#ff3b3b" : personColor(ps[0].person), text: initials + (ps.length > 1 ? `×${ps.length}` : "") };
   }).sort((a, b) => a.time - b.time);
   candles.setMarkers(markers);
 }
@@ -224,7 +226,7 @@ function customMatch(p) {
 const isAlert = (p) => p.alert || !!customMatch(p);
 
 function filteredPosts() {
-  return S.posts.filter((p) => (!S.fperson || p.person === S.fperson)
+  return (S.search ? S.search.results : S.posts).filter((p) => (!S.fperson || p.person === S.fperson)
     && (S.fsrc !== "direct" || p.source !== "gnews")
     && (S.fsrc !== "alert" || isAlert(p)));
 }
@@ -266,7 +268,8 @@ function postHTML(p) {
 function renderFeed() {
   const list = filteredPosts().slice(0, 300);
   const el = $("#feed"), top = el.scrollTop;
-  el.innerHTML = list.map(postHTML).join("") || `<div class="empty">No posts yet for this filter. Sources poll every 30s-10m.</div>`;
+  el.innerHTML = (S.search ? `<div class="empty" style="padding:6px 9px">${list.length} stored posts match “${esc(S.search.q)}” · <a href="#" id="fclear">clear</a></div>` : "")
+    + (list.map(postHTML).join("") || `<div class="empty">No posts for this filter.${S.search ? "" : " Sources poll every 30s-10m."}</div>`);
   el.scrollTop = top;
   $("#fcount").textContent = `${list.length}`;
 }
@@ -318,6 +321,8 @@ let titleTimer = null;
 function notifyUser({ title, body, tag, blink, onclick }) {
   beep();
   msg(`⚠ ${title}: ${body.slice(0, 120)}`);
+  S.lastAlertAction = onclick;
+  $("#cmdmsg").style.cursor = onclick ? "pointer" : "";
   if (S.notify && "Notification" in window && Notification.permission === "granted") {
     try {
       const n = new Notification(title, { body: body.slice(0, 260), tag });
@@ -390,7 +395,7 @@ function connectStream() {
 
 const TABS = [
   ["brief", "BRIEF"], ["news", "NEWS"], ["cal", "ECO CAL"], ["flow", "OPT FLOW"], ["cong", "CONGRESS"], ["ins", "INSIDERS"],
-  ["pred", "PREDICT"], ["track", "TRACK REC"], ["impact", "POST IMPACT"], ["f13", "13F"], ["status", "SOURCES"], ["help", "HELP"],
+  ["pred", "PREDICT"], ["track", "TRACK REC"], ["impact", "POST IMPACT"], ["alerts", "ALERTS"], ["f13", "13F"], ["status", "SOURCES"], ["help", "HELP"],
 ];
 
 function renderTabs() {
@@ -401,7 +406,7 @@ function renderTabs() {
   }).join("") + `<span style="flex:1"></span><button id="maxbtn" title="Maximize this panel (MAX)">${S.max ? "⤡ RESTORE" : "⤢ MAX"}</button>`;
 }
 
-function showTab(id) { S.tab = id; if (id === "brief") S.briefUnseen = false; store.set("tab", id); renderTabs(); renderTab(); }
+function showTab(id) { S.tab = id; if (id === "brief") S.briefUnseen = false; saveSetting("tab", id); renderTabs(); renderTab(); }
 
 function seg(name, opts, cur) {
   return `<span class="seg" data-seg="${name}">${opts.map(([v, l]) => `<button data-v="${esc(v)}" class="${v === cur ? "on" : ""}">${esc(l)}</button>`).join("")}</span>`;
@@ -478,17 +483,21 @@ const TAB_RENDER = {
         <td class="num">${u.dte}</td><td><span class="${u.lean === "bull" ? "up" : u.lean === "bear" ? "down" : "dim"}">${u.lean === "bull" ? "▲ BULL" : u.lean === "bear" ? "▼ BEAR" : "·"}</span> <span class="dim">${u.fill}</span></td>
         <td class="num" style="color:#fff">${fmtMoney(u.premium)}</td><td class="num">${fmtInt(u.volume)}</td><td class="num dim">${fmtInt(u.oi)}</td><td class="num ${u.vol_oi >= 5 ? "amber" : ""}">${u.vol_oi}×</td>
         <td class="num">${u.last}</td><td class="num dim" title="delta ${u.delta != null ? u.delta.toFixed(2) : "?"}">${u.iv}</td>
-        <td class="num ${u.otm_pct < 0 ? "dim" : ""}" title="${u.otm_pct < 0 ? "in the money" : "out of the money"}">${u.otm_pct != null ? u.otm_pct.toFixed(1) + "%" : ""}</td></tr>`).join("")}
+        <td class="num ${u.otm_pct < 0 ? "dim" : ""}" title="${u.otm_pct < 0 ? "in the money" : "out of the money"}">${u.otm_pct != null ? u.otm_pct.toFixed(1) + "%" : ""}</td>
+        <td><a href="https://finance.yahoo.com/quote/${esc(u.contract)}/" target="_blank" rel="noopener" title="Open contract on Yahoo Finance">↗</a></td></tr>`).join("")}
       </tbody></table>${items.length ? "" : `<div class="empty">No contracts match these filters.</div>`}
       <div class="note" style="padding:6px 8px">Unusual = volume ≥ ${fmtInt(500)}, premium ≥ $100K and volume ≥ 1.5× open interest (new positions likely). Fill/lean are estimated from the last print vs the current bid/ask, not trade-by-trade data. Negative OTM = in the money.</div></div>
     </div>`;
   },
 
   async news(bar, body, live) {
-    const symMode = !!S.sub.newsSym;
-    bar.innerHTML = seg("newsSym", [["", "MARKET WIRE"], ["1", `${S.sym} HEADLINES`]], symMode ? "1" : "");
+    const mode = S.sub.newsSym || "";
+    const q = S.sub.newsQ || "";
+    bar.innerHTML = seg("newsSym", [["", "MARKET WIRE"], ["1", `${S.sym} HEADLINES`], ["arch", "ARCHIVE"]], mode)
+      + (mode === "arch" ? `<input class="f" id="newsq" placeholder="search stored headlines…" value="${esc(q)}" style="width:220px"><span class="dim">every headline the terminal has seen, stored in SQLite</span>` : "");
+    if (mode === "arch") { const i = $("#newsq"); i.onchange = () => { S.sub.newsQ = i.value.trim(); renderTab(); }; }
     loading();
-    const d = await api(symMode ? "news?symbol=" + encodeURIComponent(S.sym) : "news");
+    const d = await api(mode === "arch" ? "news/archive?q=" + encodeURIComponent(q) : mode ? "news?symbol=" + encodeURIComponent(S.sym) : "news");
     if (!live()) return;
     if (d.error) { body.innerHTML = errBox(d); return; }
     body.innerHTML = `<table><thead><tr><th>TIME ET</th><th>SRC</th><th>HEADLINE</th><th>TICKERS</th></tr></thead><tbody>${d.map((n) => `
@@ -500,7 +509,7 @@ const TAB_RENDER = {
   async cal(bar, body, live) {
     const cc = S.sub.calCountry ?? "USD", imp = S.sub.calImp ?? "hm";
     bar.innerHTML = seg("calCountry", [["USD", "USD"], ["", "ALL"]], cc) + seg("calImp", [["hm", "HIGH+MED"], ["", "ALL"]], imp)
-      + `<span class="dim">This week · times ET</span>`;
+      + `<span class="dim">This week · times ET</span><a href="https://www.forexfactory.com/calendar" target="_blank" rel="noopener">forexfactory.com ↗</a>`;
     loading();
     const d = await api("calendar");
     if (!live()) return;
@@ -518,19 +527,20 @@ const TAB_RENDER = {
   },
 
   async cong(bar, body, live) {
-    const q = S.sub.congQ || "", txn = S.sub.congTxn || "";
-    bar.innerHTML = `<input class="f" id="congq" placeholder="ticker or member" value="${esc(q)}" style="width:170px">`
+    const q = S.sub.congQ || "", txn = S.sub.congTxn || "", src = S.sub.congSrc || "";
+    bar.innerHTML = seg("congSrc", [["", "LATEST 300"], ["arch", "ARCHIVE"]], src)
+      + `<input class="f" id="congq" placeholder="ticker or member" value="${esc(q)}" style="width:170px">`
       + seg("congTxn", [["", "ALL"], ["Purchase", "BUYS"], ["Sale", "SALES"]], txn)
-      + `<span class="dim">Recent disclosures via Quiver Quant · STOCK Act filings lag trades by up to 45 days</span>`;
+      + `<span class="dim">${src ? "Every disclosure stored since the terminal started" : "Via Quiver Quant"} · filings lag trades by up to 45 days</span>`;
     loading();
-    const d = await api("congress");
+    const d = await api(src ? "congress?archive=1" : "congress");
     if (!live()) return;
     if (d.error) { body.innerHTML = errBox(d); return; }
     const ql = q.toLowerCase();
     const rows = d.filter((r) => (!txn || r.txn.startsWith(txn)) && (!q || (r.ticker || "").toLowerCase() === ql || r.member.toLowerCase().includes(ql)));
     body.innerHTML = `<table><thead><tr><th>TRADED</th><th>FILED</th><th>MEMBER</th><th>TICKER</th><th>TXN</th><th>AMOUNT</th><th>ASSET</th><th class="num">XS RET</th></tr></thead><tbody>${rows.map((r) => `
       <tr><td>${esc(r.traded)}</td><td class="dim">${esc(r.filed)}</td>
-      <td><span class="party-${esc(r.party)}">${esc(r.member)}</span> <span class="dim">${esc(r.party)}-${esc(r.chamber[0] || "")}</span></td>
+      <td>${r.member_url ? `<a href="${esc(r.member_url)}" target="_blank" rel="noopener" class="party-${esc(r.party)}">${esc(r.member)}</a>` : `<span class="party-${esc(r.party)}">${esc(r.member)}</span>`} <span class="dim">${esc(r.party)}-${esc(r.chamber[0] || "")}</span></td>
       <td>${chip(r.ticker)}</td><td class="${r.txn.startsWith("Purchase") ? "up" : r.txn.startsWith("Sale") ? "down" : ""}">${esc(r.txn)}</td>
       <td>${esc(r.amount)}</td><td class="dim" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.asset)}</td>
       <td class="num ${cls(r.excess_return)}" title="Return vs SPY since trade">${r.excess_return != null ? fmtPct(r.excess_return, 1) : ""}</td></tr>`).join("")}</tbody></table>`
@@ -541,17 +551,19 @@ const TAB_RENDER = {
 
   async ins(bar, body, live) {
     const mode = S.sub.insMode || "latest";
-    bar.innerHTML = seg("insMode", [["latest", "LATEST"], ["buys", "BUYS $25K+"], ["big", "BUYS $100K+"], ["cluster", "CLUSTER BUYS"], ["sym", `${S.sym} ONLY`]], mode)
+    bar.innerHTML = seg("insMode", [["latest", "LATEST"], ["buys", "BUYS $25K+"], ["big", "BUYS $100K+"], ["cluster", "CLUSTER BUYS"], ["sym", `${S.sym} ONLY`], ["archive", "ARCHIVE"]], mode)
       + `<span class="dim">SEC Form 4 via OpenInsider</span>`;
     loading();
     const d = await api(mode === "sym" ? "insiders?ticker=" + encodeURIComponent(S.sym) : "insiders?mode=" + mode);
+    const ilink = (r) => (r.insider_url ? `<a href="${esc(r.insider_url)}" target="_blank" rel="noopener" style="color:var(--text)">${esc(r.insider)}</a>` : esc(r.insider));
     if (!live()) return;
     if (d.error) { body.innerHTML = errBox(d); return; }
-    body.innerHTML = `<table><thead><tr><th>FILED</th><th>TRADED</th><th>TICKER</th><th>COMPANY</th><th>INSIDER</th><th>TITLE</th><th>TYPE</th><th class="num">PRICE</th><th class="num">QTY</th><th class="num">ΔOWN</th><th class="num">VALUE</th></tr></thead><tbody>${d.map((r) => `
+    body.innerHTML = `<table><thead><tr><th>FILED</th><th>TRADED</th><th>TICKER</th><th>COMPANY</th><th>INSIDER</th><th>TITLE</th><th>TYPE</th><th class="num">PRICE</th><th class="num">QTY</th><th class="num">ΔOWN</th><th class="num">VALUE</th><th>FILING</th></tr></thead><tbody>${d.map((r) => `
       <tr><td class="dim" style="white-space:nowrap">${esc(r.filed)}</td><td>${esc(r.traded)}</td><td>${chip(r.ticker)}</td>
-      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.company)}</td><td>${esc(r.insider)}</td><td class="dim">${esc(r.title)}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.company)}</td><td>${ilink(r)}</td><td class="dim">${esc(r.title)}</td>
       <td class="${r.type.startsWith("P") ? "up" : r.type.startsWith("S") ? "down" : ""}">${esc(r.type)}</td>
-      <td class="num">${esc(r.price)}</td><td class="num">${esc(r.qty)}</td><td class="num">${esc(r.delta_own)}</td><td class="num ${r.value.startsWith("-") ? "down" : "up"}">${esc(r.value)}</td></tr>`).join("")}</tbody></table>`
+      <td class="num">${esc(r.price)}</td><td class="num">${esc(r.qty)}</td><td class="num">${esc(r.delta_own)}</td><td class="num ${r.value.startsWith("-") ? "down" : "up"}">${esc(r.value)}</td>
+      <td>${r.filing_url ? `<a href="${esc(r.filing_url)}" target="_blank" rel="noopener">SEC ↗</a>` : ""}</td></tr>`).join("")}</tbody></table>`
       + (d.length ? "" : `<div class="empty">No insider filings found.</div>`);
   },
 
@@ -601,7 +613,7 @@ const TAB_RENDER = {
       </tbody></table>
       <div class="amber" style="margin-top:12px">BIGGEST MOVES AFTER A POST <span class="dim">(largest move in any tagged ticker)</span></div>
       <table><thead><tr><th>WHEN</th><th>PERSON</th><th>TICKER</th><th class="num">MOVE</th><th>POST</th></tr></thead><tbody>
-      ${d.movers.map((m) => `<tr class="click" data-post="${esc(m.id)}"><td class="dim" style="white-space:nowrap">${esc(fmtET(m.ts, true))}</td><td style="color:${personColor(m.person)}">${esc(m.person)}</td><td>${chip(m.ticker)}</td>${c(m.move)}<td class="wrap">${esc(m.text.slice(0, 140))}</td></tr>`).join("")}
+      ${d.movers.map((m) => `<tr class="click" data-post="${esc(m.id)}"><td class="dim" style="white-space:nowrap">${esc(fmtET(m.ts, true))}</td><td style="color:${personColor(m.person)}">${esc(m.person)}</td><td>${chip(m.ticker)}</td>${c(m.move)}<td class="wrap">${esc(m.text.slice(0, 140))}${S.byId[m.id] && S.byId[m.id].url ? `<a class="lnk" href="${esc(S.byId[m.id].url)}" target="_blank" rel="noopener">↗</a>` : ""}</td></tr>`).join("")}
       </tbody></table>
       ${d.people.length ? "" : `<div class="empty">No measurements yet. Impact is computed a few minutes after each post (or after the next open for off-hours posts).</div>`}
       <div class="note">Correlation, not causation: a single post's move is mixed with everything else happening in the market. Averages get meaningful after dozens of posts.</div></div>`;
@@ -638,9 +650,9 @@ const TAB_RENDER = {
 
   async status(bar, body, live) {
     bar.innerHTML = `<span class="dim">Health of every data source. Errors usually mean a free source rate-limited us; it retries automatically.</span>`;
-    const d = await api("status");
+    const [d, st] = await Promise.all([api("status"), api("db/stats")]);
     if (!live()) return;
-    body.innerHTML = `<table><thead><tr><th></th><th>SOURCE</th><th>TYPE</th><th>LAST CHECK</th><th class="num">NEW</th><th>NOTE</th></tr></thead><tbody>${Object.values(d).map((s) => `
+    body.innerHTML = `<div class="note" style="padding:6px 8px">DATABASE · ${esc(st._path)} · ${st._size_mb} MB · ${Object.entries(st).filter(([k]) => !k.startsWith("_")).map(([k, v]) => `${esc(k.replace(/_/g, " "))} <b style="color:var(--text)">${fmtInt(v)}</b>`).join(" · ")}</div><table><thead><tr><th></th><th>SOURCE</th><th>TYPE</th><th>LAST CHECK</th><th class="num">NEW</th><th>NOTE</th></tr></thead><tbody>${Object.values(d).map((s) => `
       <tr><td class="${s.ok ? "up" : s.ok === false ? "down" : "dim"}">●</td><td style="color:${personColor(s.person)}">${esc(s.person)}</td><td class="dim">${esc(SRC[s.type] || s.type)}</td>
       <td class="dim">${s.last ? ago(s.last) + " ago" : "--"}</td><td class="num">${s.new ?? ""}</td><td class="${s.ok ? "dim" : "down"}">${esc(s.error || "ok")}</td></tr>`).join("")}</tbody></table>
       ${S.cfg.x_enabled ? "" : `<div class="note" style="padding:0 8px 10px">X/Twitter: no API token set, so X accounts are tracked through news coverage (NEWS badge). To get posts directly, set an X API bearer token (env X_BEARER_TOKEN or "x_bearer_token" in config.json), or add an RSS feed for an account (e.g. from rss.app) as an "rss" source.</div>`}`;
@@ -658,8 +670,12 @@ const TAB_RENDER = {
       ["BRIEF", "Pre-market brief (auto-built weekdays; BUILD NOW in the tab)"],
       ["OPT  /  OPT NVDA  /  OPT PUTS", "Unusual options flow (also OPT MENTIONED, OPT WATCH)"],
       ["TRACK", "Post-impact track record per person"], ["IMPACT", "Impact of the selected post"],
-      ["FEED TRUMP  /  FEED ALL", "Filter the market-movers feed by person"], ["ALERTS", "Show only alert posts"],
-      ["ALERT NVIDIA", "Add your own alert keyword (stored in this browser)"], ["UNALERT NVIDIA", "Remove a custom alert keyword"],
+      ["FEED TRUMP  /  FEED ALL", "Filter the market-movers feed by person"],
+      ["ALERT NVIDIA", "Add your own alert keyword (saved in the database)"], ["UNALERT NVIDIA", "Remove a custom alert keyword"],
+      ["ALERTS", "Alert history: every post / options / brief alert with links"], ["FIND TARIFF", "Search every stored post"],
+      ["THEME PHOSPHOR", "Switch color theme (amber, phosphor, midnight, synth, crimson, ice, graphite, oled)"],
+      ["SETTINGS  or  ⚙", "Theme, accent color, text size, panels, watchlist, alert keywords, database stats"],
+      ["LAYOUT", "Reset panel sizes and visibility (drag panel borders to resize)"],
       ["ALERT", "List custom alert keywords"], ["MUTE  /  UNMUTE", "Alert sound off/on"], ["MAX", "Maximize / restore the bottom panel"],
       ["STATUS", "Data source health"], ["Alt+1 … Alt+0", "Switch bottom tabs"], ["/", "Focus the command bar"], ["Esc", "Clear command bar"],
     ];
@@ -668,6 +684,36 @@ const TAB_RENDER = {
       <div style="margin-top:10px"><span class="amber">Alerts</span> <span class="dim">fire on new posts from direct sources (Truth Social, X, official feeds) that hit an alert topic
       (tariffs, China, Fed, war, fiscal), an alert keyword, a watchlist company, or one of your custom keywords. Edit topics and keywords in config.json.</span></div></div>`;
   },
+};
+
+/* ============================================================ post search & alert history */
+
+async function searchPosts(q) {
+  q = (q || "").trim();
+  if (!q) { S.search = null; renderFeed(); return; }
+  const results = await api("posts?limit=500&q=" + encodeURIComponent(q));
+  if (($("#fsearch").value || "").trim() !== q && !S.searchFromCmd) { /* user kept typing */ }
+  mergePosts(results);
+  S.search = { q, results: results.map((p) => S.byId[p.id]) };
+  renderFeed();
+}
+
+TAB_RENDER.alerts = async (bar, body, live) => {
+  const kind = S.sub.alertKind || "";
+  bar.innerHTML = seg("alertKind", [["", "ALL"], ["post", "POSTS"], ["flow", "OPTIONS"], ["brief", "BRIEFS"]], kind)
+    + `<span class="dim">Every alert the terminal has fired, stored in the database</span>`;
+  loading();
+  const d = await api("alerts?limit=500" + (kind ? "&kind=" + kind : ""));
+  if (!live()) return;
+  const icon = { post: "⚠", flow: "⚡", brief: "☀" };
+  body.innerHTML = `<table><thead><tr><th>WHEN ET</th><th></th><th>ALERT</th><th>DETAIL</th><th>TICKERS</th><th>LINK</th></tr></thead><tbody>${d.map((a) => {
+    const action = a.kind === "post" ? `data-post="${esc(a.ref)}"` : a.kind === "brief" ? `data-brief="${esc(a.ref)}"` : a.symbol ? `data-flowsym="${esc(a.symbol)}"` : "";
+    return `<tr class="click" ${action}><td class="dim" style="white-space:nowrap">${esc(fmtET(a.ts, true))}</td><td class="amber">${icon[a.kind] || "•"}</td>
+      <td style="color:${a.kind === "post" ? personColor(a.title.split(" (")[0]) : "var(--amber)"}">${esc(a.title)}</td>
+      <td class="wrap">${esc((a.body || "").slice(0, 220))}</td>
+      <td>${(a.symbol || "").split(",").filter(Boolean).slice(0, 4).map(chip).join(" ")}</td>
+      <td>${a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">open ↗</a>` : a.kind === "brief" ? `<span class="dim">BRIEF tab</span>` : ""}</td></tr>`;
+  }).join("")}</tbody></table>` + (d.length ? "" : `<div class="empty">No alerts yet. They are logged here as they fire (posts, options flow, briefs).</div>`);
 };
 
 /* ============================================================ brief layout */
@@ -679,7 +725,7 @@ function briefHTML(b) {
     <td class="num ${cls(q.move)}">${fmtPct(q.move)}</td><td class="dim">${q.basis === "pre" ? "PRE" : ""}</td></tr>`;
   const card = (title, inner, cls_ = "") => `<div class="bcard ${cls_}"><h4>${title}</h4>${inner}</div>`;
   const P = b.posts, M = b.movers, O = b.options;
-  const optRow = (u) => `<tr><td><span class="chip" data-sym="${esc(u.symbol)}">${esc(u.symbol)}</span> ${esc(u.exp.slice(5))} <b class="${u.type === "C" ? "up" : "down"}">${u.strike}${u.type}</b></td>
+  const optRow = (u) => `<tr><td><span class="chip" data-sym="${esc(u.symbol)}">${esc(u.symbol)}</span> <a href="https://finance.yahoo.com/quote/${esc(u.contract)}/" target="_blank" rel="noopener" style="color:var(--text)">${esc(u.exp.slice(5))} <b class="${u.type === "C" ? "up" : "down"}">${u.strike}${u.type}</b></a></td>
     <td class="num">${fmtMoney(u.premium)}</td><td class="num">${u.vol_oi}×</td><td class="${u.lean === "bull" ? "up" : u.lean === "bear" ? "down" : "dim"}">${u.lean || ""}</td></tr>`;
   return `<div class="bhead">${esc(b.headline || b.kind)}</div><div class="bcards">
     ${card("FUTURES & MACRO", `<table>${b.futures.map(qrow).join("")}</table>`)}
@@ -687,7 +733,7 @@ function briefHTML(b) {
       `<div class="bstat"><b>${P.count}</b> direct posts · <b class="${P.alert_count ? "down" : ""}">${P.alert_count}</b> alerts · ${P.news_count} news items</div>
       <div class="bline">${P.by_person.map(([p, n]) => `<span style="color:${personColor(p)}">${esc(p)} ${n}</span>`).join(" · ") || `<span class="dim">quiet night</span>`}</div>
       ${P.topics.length ? `<div class="bline">${P.topics.map(([t, n]) => `<span class="cat">${esc(t)} ${n}</span>`).join(" ")}</div>` : ""}
-      ${P.alerts.map((p) => `<div class="balert click" data-post="${esc(p.id)}"><span class="dim">${esc(fmtET(p.ts))}</span> <b style="color:${personColor(p.person)}">${esc(p.person)}</b> ${esc(p.text.slice(0, 180))}
+      ${P.alerts.map((p) => `<div class="balert click" data-post="${esc(p.id)}"><span class="dim">${esc(fmtET(p.ts))}</span> <b style="color:${personColor(p.person)}">${esc(p.person)}</b> ${esc(p.text.slice(0, 180))}${p.url ? `<a class="lnk" href="${esc(p.url)}" target="_blank" rel="noopener">open ↗</a>` : ""}
         <div>${p.tickers.slice(0, 6).map((t) => `<span class="chip" data-sym="${esc(t)}">${esc(t)}</span>`).join(" ")}</div></div>`).join("")}`, "wide")}
     ${card(`${esc(b.calendar_label || "TODAY'S CALENDAR")} <span class="dim">USD · high/med</span>`, b.calendar.length ? `<table>${b.calendar.map((e) => {
       const p = etParts(new Date(e.ts * 1000));
@@ -701,9 +747,9 @@ function briefHTML(b) {
     ${card(`UNUSUAL OPTIONS <span class="dim">${esc(O.day || "no scan yet")} · ex-0DTE</span>`, O.top.length ? `<table>${O.top.slice(0, 10).map(optRow).join("")}</table>
       ${O.hot.length ? `<div class="bline">Volume vs avg: ${O.hot.map((r) => `<span class="chip" data-sym="${esc(r.symbol)}">${esc(r.symbol)} ${r.vol_vs_avg.toFixed(1)}×</span>`).join(" ")}</div>` : ""}
       ${O.mentioned.length ? `<div class="bline amber">On tickers mentioned overnight:</div><table>${O.mentioned.slice(0, 5).map(optRow).join("")}</table>` : ""}` : `<div class="dim">No unusual options recorded yet.</div>`)}
-    ${card("CONGRESS FILINGS <span class=\"dim\">since close</span>", b.congress.length ? `<table>${b.congress.map((r) => `<tr><td class="party-${esc(r.party)}">${esc(r.member)}</td><td>${chip(r.ticker)}</td>
+    ${card("CONGRESS FILINGS <span class=\"dim\">since close</span>", b.congress.length ? `<table>${b.congress.map((r) => `<tr><td>${r.member_url ? `<a href="${esc(r.member_url)}" target="_blank" rel="noopener" class="party-${esc(r.party)}">${esc(r.member)}</a>` : esc(r.member)}</td><td>${chip(r.ticker)}</td>
       <td class="${r.txn.startsWith("Purchase") ? "up" : "down"}">${esc(r.txn)}</td><td class="dim">${esc(r.amount)}</td></tr>`).join("")}</table>` : `<div class="dim">No new disclosures.</div>`)}
-    ${card("INSIDER BUYS $100K+ <span class=\"dim\">since close</span>", b.insiders.length ? `<table>${b.insiders.map((r) => `<tr><td>${chip(r.ticker)}</td><td>${esc(r.insider)}</td><td class="dim">${esc(r.title)}</td><td class="num up">${esc(r.value)}</td></tr>`).join("")}</table>` : `<div class="dim">None filed.</div>`)}
+    ${card("INSIDER BUYS $100K+ <span class=\"dim\">since close</span>", b.insiders.length ? `<table>${b.insiders.map((r) => `<tr><td>${chip(r.ticker)}</td><td>${esc(r.insider)}</td><td class="dim">${esc(r.title)}</td><td class="num up">${esc(r.value)}</td><td>${r.filing_url ? `<a href="${esc(r.filing_url)}" target="_blank" rel="noopener">SEC ↗</a>` : ""}</td></tr>`).join("")}</table>` : `<div class="dim">None filed.</div>`)}
   </div>${b.errors.length ? `<div class="note" style="padding:0 10px 10px">Some sections failed: ${esc(b.errors.join(" | "))}</div>` : ""}`;
 }
 
@@ -714,11 +760,12 @@ const GLOBAL_LABELS = { "^N225": "NIKKEI", "^HSI": "HANG SENG", "000001.SS": "SH
 
 const RANGES = { "1D": "1d", "5D": "5d", "1M": "1mo", "3M": "3mo", "6M": "6mo", "1Y": "1y", "5Y": "5y" };
 
-function saveWatch() { store.set("watch", S.watch); }
+function saveWatch() { saveSetting("watchlist", S.watch); renderWatchBtn(); }
 
 function runCommand(raw) {
   const text = raw.trim();
   if (!text) return;
+  pushHistory(text);
   const parts = text.toUpperCase().split(/\s+/).filter((w) => w !== "GO" && w !== "<GO>");
   const [c, ...rest] = parts;
   const arg = rest.join(" ");
@@ -759,7 +806,18 @@ function runCommand(raw) {
     }
     case "IMPACT": case "IMP": return showTab("impact");
     case "STATUS": case "SOURCES": return showTab("status");
-    case "ALERTS": setSeg("#fsrc", "alert"); S.fsrc = "alert"; return renderFeed();
+    case "ALERTS": case "ALRT": return showTab("alerts");
+    case "FIND": case "SEARCH": { const q = text.split(/\s+/).slice(1).join(" "); $("#fsearch").value = q; return searchPosts(q); }
+    case "THEME": {
+      const k = (rest[0] || "").toLowerCase();
+      const key = THEMES[k] ? k : Object.keys(THEMES).find((x) => THEMES[x].name.toLowerCase().includes(k));
+      if (!key) return msg("Themes: " + Object.keys(THEMES).join(", "), !!k);
+      S.ui.theme = key; S.ui.accent = ""; applyTheme(); saveUI(); return msg("Theme: " + THEMES[key].name);
+    }
+    case "SETTINGS": case "SET": case "PREFS": case "CONFIG": return openSettings();
+    case "LAYOUT":
+      S.ui.panels = { ...UI_DEFAULTS.panels }; S.ui.sizes = { ...UI_DEFAULTS.sizes }; S.ui.swap = false;
+      applyLayout(); saveUI(); return msg("Layout reset");
     case "FEED": {
       if (!arg || arg === "ALL") { S.fperson = ""; S.fsrc = ""; setSeg("#fsrc", ""); }
       else {
@@ -773,11 +831,11 @@ function runCommand(raw) {
       const kw = text.slice(5).trim().toLowerCase();
       if (!kw) return msg("Custom alerts: " + (S.customAlerts.join(", ") || "none"));
       if (!S.customAlerts.includes(kw)) S.customAlerts.push(kw);
-      store.set("alerts", S.customAlerts); renderFeed(); updateMarkers(); return msg(`Alerting on "${kw}"`);
+      saveSetting("custom_alerts", S.customAlerts); renderFeed(); updateMarkers(); return msg(`Alerting on "${kw}"`);
     }
     case "UNALERT": {
       const kw = text.slice(7).trim().toLowerCase();
-      S.customAlerts = S.customAlerts.filter((k) => k !== kw); store.set("alerts", S.customAlerts); renderFeed(); return msg(`Removed "${kw}"`);
+      S.customAlerts = S.customAlerts.filter((k) => k !== kw); saveSetting("custom_alerts", S.customAlerts); renderFeed(); return msg(`Removed "${kw}"`);
     }
     case "MAX": case "MIN": return toggleMax();
     case "MUTE": S.sound = false; return syncToggles();
@@ -789,7 +847,7 @@ function runCommand(raw) {
 
 function toggleMax() {
   S.max = !S.max; store.set("max", S.max);
-  $("#grid").classList.toggle("maxbottom", S.max); renderTabs();
+  $("#grid").classList.toggle("maxbottom", S.max); renderTabs(); placeGutters();
 }
 
 function setSeg(sel, v) { $$(sel + " button").forEach((b) => b.classList.toggle("on", b.dataset.v === v)); }
@@ -807,7 +865,7 @@ function bindEvents() {
     if (e.altKey && /^[0-9]$/.test(e.key)) {
       e.preventDefault(); const i = (+e.key + 9) % 10; if (TABS[i]) showTab(TABS[i][0]); return;
     }
-    if (e.key === "Escape") { $("#cmd").value = ""; $("#cmd").blur(); return; }
+    if (e.key === "Escape") { if ($("#settings")?.classList.contains("open")) closeSettings(); if (document.activeElement === $("#cmd")) { $("#cmd").value = ""; $("#cmd").blur(); } return; }
     if (!inInput && (e.key === "/" || (/^[a-zA-Z]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey))) {
       $("#cmd").focus(); if (e.key === "/") e.preventDefault();
     }
@@ -815,6 +873,11 @@ function bindEvents() {
 
   // delegated clicks: ticker chips & watchlist rows & tape
   document.addEventListener("click", (e) => {
+    const wd = e.target.closest("[data-wdel]");
+    if (wd) { e.stopPropagation(); toggleWatch(wd.dataset.wdel); return; }
+    if (e.target.closest("#fclear")) { e.preventDefault(); $("#fsearch").value = ""; searchPosts(""); return; }
+    if (e.target.closest("#cmdmsg") && S.lastAlertAction) { S.lastAlertAction(); return; }
+    if (e.target.closest("#settings")) return;
     const symEl = e.target.closest("[data-sym]");
     if (symEl) { e.stopPropagation(); loadChart(symEl.dataset.sym); return; }
     const post = e.target.closest(".post");
@@ -824,8 +887,10 @@ function bindEvents() {
     if (tab) { showTab(tab.dataset.tab); return; }
     const sg = e.target.closest("[data-seg] button");
     if (sg) { S.sub[sg.parentElement.dataset.seg] = sg.dataset.v; renderTab(); return; }
+    const br = e.target.closest("[data-brief]");
+    if (br) { S.sub.briefDay = br.dataset.brief; showTab("brief"); return; }
     const fs = e.target.closest("tr[data-flowsym]");
-    if (fs) { S.sub.flowScope = "sym"; loadChart(fs.dataset.flowsym).then(renderTab); return; }
+    if (fs) { S.sub.flowScope = "sym"; if (S.tab !== "flow") showTab("flow"); loadChart(fs.dataset.flowsym).then(renderTab); return; }
     const pr = e.target.closest("[data-post]");
     if (pr) { selectPost(pr.dataset.post); return; }
     const pp = e.target.closest("tr[data-person]");
@@ -835,10 +900,13 @@ function bindEvents() {
   $("#ranges").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) loadChart(S.sym, b.dataset.v); });
   $("#mkmode").addEventListener("click", (e) => {
     const b = e.target.closest("button"); if (!b) return;
-    S.mkmode = b.dataset.v; setSeg("#mkmode", S.mkmode); store.set("mkmode", S.mkmode); updateMarkers();
+    S.mkmode = b.dataset.v; setSeg("#mkmode", S.mkmode); saveSetting("mkmode", S.mkmode); updateMarkers();
   });
   $("#fsrc").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; S.fsrc = b.dataset.v; setSeg("#fsrc", S.fsrc); renderFeed(); });
   $("#fperson").addEventListener("change", (e) => { S.fperson = e.target.value; renderFeed(); });
+  let fsTimer = null;
+  $("#fsearch").addEventListener("input", (e) => { clearTimeout(fsTimer); fsTimer = setTimeout(() => searchPosts(e.target.value), 300); });
+  $("#fsearch").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.target.value = ""; searchPosts(""); } });
 
   $("#sound").addEventListener("click", () => { S.sound = !S.sound; syncToggles(); if (S.sound) beep(); });
   $("#bell").addEventListener("click", async () => {
@@ -855,24 +923,22 @@ function bindEvents() {
 async function boot() {
   tickClock(); setInterval(tickClock, 1000);
   S.cfg = await api("config");
-  S.watch = store.get("watch", S.cfg.watchlist);
-  S.customAlerts = store.get("alerts", []);
+  await loadSettings();                             // watchlist, alerts, theme, layout: stored in SQLite
   S.sound = store.get("sound", true);
   S.notify = store.get("notify", false) && "Notification" in window && Notification.permission === "granted";
-  S.mkmode = store.get("mkmode", "key");
-  S.tab = store.get("tab", "brief");
   S.max = store.get("max", false);
   $("#grid").classList.toggle("maxbottom", S.max);
   setSeg("#mkmode", S.mkmode);
   syncToggles();
   bindEvents();
   initChart();
+  initUI();
   renderTabs();
   mergePosts(await api("posts?limit=600"));
   fillPeople();
   renderFeed();
   await refreshQuotes();
-  loadChart(store.get("sym", "SPY"));
+  loadChart(S.startSym || "SPY");
   renderTab();
   connectStream();
 
@@ -880,7 +946,7 @@ async function boot() {
   setInterval(reloadPosts, 90000);                 // pick up impact measurements as they complete
   setInterval(() => { if (["news", "pred", "status", "track", "flow"].includes(S.tab)) renderTab(); }, 60000);
   setInterval(() => { if (S.range === "1d") loadChart(S.sym); }, 60000);
-  window.addEventListener("beforeunload", () => store.set("sym", S.sym));
+
 }
 
 boot().catch((e) => { document.body.insertAdjacentHTML("afterbegin", `<div style="color:#f55;padding:8px">Failed to start: ${esc(e.message)}. Is the server running?</div>`); });
