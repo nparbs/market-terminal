@@ -123,3 +123,61 @@ async def search(q):
                  "type": x.get("quoteType"), "exchange": x.get("exchDisp")}
                 for x in r.json().get("quotes", []) if x.get("symbol") and x.get("quoteType") in SEARCH_TYPES]
     return await _cached(("search", q.lower()), 3600, fetch)
+
+
+# Yahoo has no sector for funds, so common ETFs get a hand-made category.
+ETF_SECTORS = {
+    "SPY": ("Index ETFs", "S&P 500"), "VOO": ("Index ETFs", "S&P 500"), "IVV": ("Index ETFs", "S&P 500"),
+    "QQQ": ("Index ETFs", "Nasdaq-100"), "DIA": ("Index ETFs", "Dow 30"), "IWM": ("Index ETFs", "Russell 2000"),
+    "VTI": ("Index ETFs", "Total market"), "RSP": ("Index ETFs", "S&P equal weight"),
+    "SMH": ("Technology", "Semiconductor ETF"), "SOXX": ("Technology", "Semiconductor ETF"), "XLK": ("Technology", "Tech sector ETF"),
+    "IGV": ("Technology", "Software ETF"), "ARKK": ("Technology", "Innovation ETF"),
+    "XLE": ("Energy", "Energy sector ETF"), "USO": ("Energy", "Crude oil fund"), "UNG": ("Energy", "Natural gas fund"), "XOP": ("Energy", "E&P ETF"),
+    "XLF": ("Financial Services", "Financials ETF"), "KBE": ("Financial Services", "Bank ETF"), "KRE": ("Financial Services", "Regional bank ETF"),
+    "XLV": ("Healthcare", "Healthcare ETF"), "XBI": ("Healthcare", "Biotech ETF"), "IBB": ("Healthcare", "Biotech ETF"),
+    "XLI": ("Industrials", "Industrials ETF"), "ITA": ("Industrials", "Aerospace & defense ETF"), "XHB": ("Consumer Cyclical", "Homebuilders ETF"),
+    "XLY": ("Consumer Cyclical", "Consumer discretionary ETF"), "XLP": ("Consumer Defensive", "Staples ETF"),
+    "XLU": ("Utilities", "Utilities ETF"), "XLRE": ("Real Estate", "Real estate ETF"), "XLB": ("Basic Materials", "Materials ETF"),
+    "XLC": ("Communication Services", "Communications ETF"), "SLX": ("Basic Materials", "Steel ETF"),
+    "TLT": ("Bonds & Rates", "20+yr Treasuries"), "IEF": ("Bonds & Rates", "7-10yr Treasuries"), "SHY": ("Bonds & Rates", "1-3yr Treasuries"),
+    "HYG": ("Bonds & Rates", "High yield"), "LQD": ("Bonds & Rates", "Investment grade"), "TBT": ("Bonds & Rates", "Short Treasuries"),
+    "GLD": ("Commodities", "Gold"), "IAU": ("Commodities", "Gold"), "SLV": ("Commodities", "Silver"), "DBC": ("Commodities", "Broad commodities"),
+    "FXI": ("International", "China large-cap"), "KWEB": ("International", "China internet"), "MCHI": ("International", "China"),
+    "EEM": ("International", "Emerging markets"), "EFA": ("International", "Developed ex-US"), "EWJ": ("International", "Japan"),
+    "EWZ": ("International", "Brazil"), "INDA": ("International", "India"), "EWT": ("International", "Taiwan"),
+    "IBIT": ("Crypto", "Spot bitcoin ETF"), "FBTC": ("Crypto", "Spot bitcoin ETF"), "ETHA": ("Crypto", "Spot ether ETF"),
+    "UVXY": ("Volatility", "VIX futures"), "VXX": ("Volatility", "VIX futures"), "SQQQ": ("Index ETFs", "3x short Nasdaq"), "TQQQ": ("Index ETFs", "3x Nasdaq"),
+}
+TYPE_SECTORS = {"INDEX": "Indices", "FUTURE": "Futures", "CRYPTOCURRENCY": "Crypto", "CURRENCY": "FX", "ETF": "Other ETFs",
+                "MUTUALFUND": "Funds"}
+
+
+def _symbol_type(sym):
+    if sym.startswith("^"):
+        return "INDEX"
+    if sym.endswith("=F"):
+        return "FUTURE"
+    if sym.endswith("=X"):
+        return "CURRENCY"
+    if sym.endswith("-USD"):
+        return "CRYPTOCURRENCY"
+    return None
+
+
+async def profile(sym):
+    """Sector / industry / type for one ticker. Stocks come from Yahoo search; funds use ETF_SECTORS."""
+    kind = _symbol_type(sym)
+    if sym in ETF_SECTORS:
+        sec, ind = ETF_SECTORS[sym]
+        return {"symbol": sym, "type": "ETF", "sector": sec, "industry": ind, "name": None}
+    if kind:
+        return {"symbol": sym, "type": kind, "sector": TYPE_SECTORS[kind], "industry": None, "name": None}
+    r = await _client.get("https://query2.finance.yahoo.com/v1/finance/search",
+                          params={"q": sym, "quotesCount": 6, "newsCount": 0, "listsCount": 0})
+    r.raise_for_status()
+    quotes = r.json().get("quotes", [])
+    x = next((q for q in quotes if q.get("symbol", "").upper() == sym.upper()), None) or {}
+    qtype = x.get("quoteType") or "EQUITY"
+    sector = x.get("sector") or x.get("sectorDisp") or TYPE_SECTORS.get(qtype) or "Other"
+    return {"symbol": sym, "type": qtype, "sector": sector, "industry": x.get("industry") or x.get("industryDisp"),
+            "name": x.get("shortname") or x.get("longname")}

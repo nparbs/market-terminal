@@ -179,7 +179,7 @@ const COMMANDS = [
   ["INS", "[TICKER|BUYS|BIG|CLUSTER]", "Insider trades", "sym"], ["PRED", "[KALSHI|TAG]", "Prediction markets"],
   ["TRACK", "", "Post-impact track record"], ["IMPACT", "", "Impact of the selected post"], ["ALERTS", "", "Alert history with links"],
   ["13F", "", "Fund holdings filings"], ["STATUS", "", "Data sources and database"], ["ADD", "TICKER …", "Add to watchlist", "sym"],
-  ["DEL", "TICKER …", "Remove from watchlist", "watch"], ["FEED", "PERSON|ALL", "Filter the feed by person", "person"],
+  ["DEL", "TICKER …", "Remove from watchlist", "watch"], ["SORT", "SECTOR|CHG|MOVERS|EXT|VOL|MENTIONS|FLOW|AZ|MANUAL", "Sort or group the watchlist", "sort"], ["FEED", "PERSON|ALL", "Filter the feed by person", "person"],
   ["FIND", "TEXT", "Search every stored post"], ["ALERT", "KEYWORD", "Add a custom alert keyword"], ["UNALERT", "KEYWORD", "Remove a custom alert keyword", "alertkw"],
   ["THEME", "NAME", "Switch color theme", "theme"], ["SETTINGS", "", "Theme, layout and display settings"], ["LAYOUT", "RESET", "Reset panel sizes and visibility"],
   ["MAX", "", "Maximize / restore the bottom panel"], ["MUTE", "", "Alert sound off"], ["UNMUTE", "", "Alert sound on"], ["HELP", "", "All commands"],
@@ -214,6 +214,9 @@ function buildSuggestions(raw) {
       S.cfg.people.filter((p) => p.toUpperCase().includes(parts.slice(1).join(" "))).slice(0, 10).forEach((p) => out.push({ kind: "person", text: p }));
     } else if (ctx === "theme") {
       Object.entries(THEMES).filter(([k, t]) => k.toUpperCase().startsWith(last) || t.name.toUpperCase().includes(last)).forEach(([k, t]) => out.push({ kind: "theme", key: k, text: t.name }));
+    } else if (ctx === "sort") {
+      ["SECTOR", "INDUSTRY", "TYPE", "CHG", "LOSERS", "MOVERS", "EXT", "VOL", "MENTIONS", "FLOW", "AZ", "MANUAL"]
+        .filter((k) => k.startsWith(last)).forEach((k) => out.push({ kind: "fill", text: "SORT " + k, desc: "" }));
     } else if (ctx === "alertkw") {
       S.customAlerts.filter((k) => k.toUpperCase().startsWith(last)).forEach((k) => out.push({ kind: "fill", text: `UNALERT ${k}`, desc: "custom alert keyword" }));
     } else {

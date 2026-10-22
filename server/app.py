@@ -355,6 +355,25 @@ async def put_settings(values: dict = Body(...)):
     return {"ok": True}
 
 
+@app.get("/api/profiles")
+async def profiles(symbols: str):
+    """Sector/industry/type for watchlist sorting; cached in SQLite for 30 days."""
+    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()][:200]
+    have = db.get_profiles(syms)
+    sem = asyncio.Semaphore(4)
+
+    async def one(s):
+        async with sem:
+            try:
+                p = await market.profile(s)
+            except Exception:
+                return
+        db.save_profile(p)
+        have[s] = p
+    await asyncio.gather(*(one(s) for s in syms if s not in have))
+    return have
+
+
 @app.get("/api/search")
 async def search(q: str):
     return await safe(market.search)(q)

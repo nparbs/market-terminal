@@ -31,6 +31,24 @@ Then open http://127.0.0.1:8765. Use 127.0.0.1 rather than `localhost`. `localho
 
 Start typing anywhere and the command bar opens a search dropdown with matching commands, your recent commands, and tickers. Ticker matches come from your watchlist and Yahoo Finance search, so typing `nvid` or `palantir` works. Use ↑/↓ to pick a result, Tab to complete it, and Enter to run it. Every ticker result has a **+ WATCH** button. The chart header has the same button, and each watchlist row has a ✕ on hover to remove it.
 
+### Sorting the watchlist
+
+Use the dropdown in the watchlist header, or the `SORT` command:
+
+| Option | What it does |
+|---|---|
+| Manual | Your own order. Drag rows to reorder them |
+| A → Z | Alphabetical |
+| % change ↓ / ↑ | Gainers first, or losers first |
+| Biggest move | Largest move in either direction |
+| Pre / after-hours move | Largest extended-hours move |
+| Volume | Day volume |
+| Group: sector / industry / asset type | Collapsible groups, each showing its average move, ordered strongest to weakest. Click a group header to collapse it |
+| Post mentions | Tickers mentioned most in posts over the last 24h |
+| Unusual options $ | Today's unusual-options premium per ticker |
+
+Sector and industry come from Yahoo for stocks and from a built-in category map for common ETFs (Index ETFs, Bonds & Rates, Commodities, International…). Crypto, futures, indices and FX are grouped by asset type. Lookups are cached in the database (`profiles` table) for 30 days. Your sort choice and collapsed groups are saved with your settings.
+
 ### Customising the layout
 
 Open **⚙ Settings** (or type `SETTINGS`) to change:
@@ -85,7 +103,8 @@ Everything is stored in SQLite at `data/terminal.db`:
 | `prediction_snapshots` | Hourly Polymarket and Kalshi odds, for history |
 | `options_daily`, `options_unusual` | Options flow history |
 | `briefs` | Every brief |
-| `settings` | Watchlist, custom alerts, theme, layout and command history. These sync to any browser that opens the terminal |
+| `settings` | Watchlist, custom alerts, theme, layout, watchlist sort and command history. These sync to any browser that opens the terminal |
+| `profiles` | Sector / industry / asset type per ticker (30-day cache) |
 
 A background archiver saves news every 10 minutes, congress and insider trades every 30 minutes, and prediction odds every hour. Row counts appear in **⚙ Settings → Database** and the SOURCES tab. Set `MT_DB` to use a different database file.
 

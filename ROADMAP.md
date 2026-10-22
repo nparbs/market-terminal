@@ -100,6 +100,15 @@
 - [x] Links on brief alerts, congress members, insider filings, options contracts, track-record moves, the calendar
 - [x] Clicking the alert in the top bar jumps to it
 
+## Done (v0.4)
+
+### Watchlist sorting
+- [x] Sort menu + `SORT` command: manual, A→Z, % change ↑/↓, biggest move, pre/after-hours move, volume, post mentions, unusual-options premium
+- [x] Group by sector, industry or asset type, with collapsible groups showing each group's average move, strongest group first
+- [x] Sector/industry lookups (Yahoo for stocks, built-in category map for ETFs) cached in the `profiles` table
+- [x] Drag-to-reorder rows in manual mode
+- [x] Sort mode and collapsed groups saved in settings
+
 ---
 
 ## Next up
@@ -132,7 +141,7 @@
 
 ### Terminal UX
 - [ ] Multiple chart panes, or a compare overlay (e.g. NVDA vs SMH vs SPY)
-- [ ] Pop-out panels, multiple named layouts, drag-to-reorder watchlist
+- [ ] Pop-out panels and multiple named layouts
 - [ ] Edit topics, sources and options thresholds in the UI instead of `config.json`
 - [ ] Prediction-market history charts from the stored snapshots
 - [ ] Watchlist groups / multiple watchlists
@@ -143,3 +152,41 @@
 - [ ] Back off automatically on 429s per source
 - [ ] Tests for the tagger and impact math
 - [ ] Health check if a source has been silent too long
+
+---
+
+## Ideas backlog
+
+### Watchlist
+- [ ] Custom columns: sector, market cap, 52-week range position, distance from 50/200-day average, RSI, earnings date
+- [ ] Sort by relative strength vs SPY or vs the stock's own sector ETF (who is beating their group?)
+- [ ] Sort by distance from 52-week high/low, gap %, or relative volume (today vs 20-day average)
+- [ ] Sparkline period choice (1D / 5D / 1M) and intraday VWAP marker
+- [ ] Price alerts per ticker (above / below / % move) with the same notification pipeline
+- [ ] Multiple named watchlists or tabs (e.g. "Tariff exposure", "AI", "Trump trades")
+- [ ] Smart lists that fill themselves: "mentioned by Trump this week", "unusual options today", "insider cluster buys"
+- [ ] Notes and tags per ticker
+
+### Market overview
+- [ ] Sector heatmap / treemap from the grouped watchlist and the 11 sector ETFs (1D / 1W / 1M)
+- [ ] Sector rotation panel: which sectors lead or lag after tariff, Fed and China posts
+- [ ] Market breadth: advancers vs decliners, new highs/lows, % above the 50-day average
+- [ ] Rates and FX strip with the yield curve (2s10s) and Fed funds futures-implied path
+- [ ] Earnings calendar with expected move (from option prices) and the actual post-earnings move
+
+### Posts and signals
+- [ ] Per-sector post exposure: which sectors a person's posts hit most, and how those sectors reacted
+- [ ] Fed speaker hawk/dove keyword score and how yields moved after each speech
+- [ ] Economic surprise tracker: actual vs forecast for each release, plus the market's reaction
+- [ ] VIX and futures spike detector that looks back for the post or headline that likely caused it
+- [ ] Social sentiment sources: StockTwits trending, Reddit (r/wallstreetbets) mention counts, Google Trends
+- [ ] Short interest and FINRA dark-pool volume per ticker
+
+### Tools
+- [ ] Trade journal: log trades and link them to the post or alert that prompted them; review P&L by signal
+- [ ] Portfolio tracking with P&L, exposure by sector, and alerts on posts that touch your holdings
+- [ ] CSV export for any table; import/export settings as JSON
+- [ ] Database retention settings and automatic backups of `terminal.db`
+- [ ] Customisable keyboard shortcuts and per-alert-type sounds
+- [ ] Installable PWA with push notifications for phone use
+

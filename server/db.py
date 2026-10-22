@@ -65,6 +65,9 @@ def conn():
             CREATE TABLE IF NOT EXISTS insider_trades (
                 id TEXT PRIMARY KEY, filed TEXT, ticker TEXT, data TEXT
             );
+            CREATE TABLE IF NOT EXISTS profiles (     -- sector / industry / asset type per ticker
+                symbol TEXT PRIMARY KEY, name TEXT, type TEXT, sector TEXT, industry TEXT, updated INTEGER
+            );
             CREATE TABLE IF NOT EXISTS prediction_snapshots (
                 ts INTEGER, venue TEXT, event TEXT, label TEXT, yes REAL
             );
@@ -337,3 +340,22 @@ def stats():
     out["_size_mb"] = round(DB_PATH.stat().st_size / 1e6, 2) if DB_PATH.exists() else 0
     out["_path"] = str(DB_PATH)
     return out
+
+
+# ---------------------------------------------------------------- ticker profiles
+
+def get_profiles(symbols, max_age=30 * 86400):
+    if not symbols:
+        return {}
+    marks = ",".join("?" * len(symbols))
+    with _lock:
+        rows = conn().execute(f"SELECT * FROM profiles WHERE symbol IN ({marks}) AND updated > ?",
+                              (*symbols, int(time.time() - max_age))).fetchall()
+    return {r["symbol"]: dict(r) for r in rows}
+
+
+def save_profile(p):
+    with _lock:
+        conn().execute("INSERT OR REPLACE INTO profiles VALUES (?,?,?,?,?,?)",
+                       (p["symbol"], p.get("name"), p.get("type"), p.get("sector"), p.get("industry"), int(time.time())))
+        conn().commit()

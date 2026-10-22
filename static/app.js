@@ -5,7 +5,7 @@
 const S = {
   cfg: null, watch: [], quotes: {}, posts: [], byId: {},
   sym: "SPY", range: "5d", mkmode: "key", fperson: "", fsrc: "",
-  sel: null, tab: "news", sound: true, notify: false, customAlerts: [],
+  sel: null, tab: "news", sound: true, notify: false, customAlerts: [], profiles: {}, flowPrem: null,
   bars: [], gmt: 0, markerPosts: {}, sub: {},
 };
 
@@ -94,22 +94,153 @@ async function refreshQuotes() {
   for (const q of qs) S.quotes[q.symbol] = q;
   renderWatch(prev);
   renderTape();
+  const ws = S.ui && S.ui.watchSort;
+  if (["sector", "industry", "type"].includes(ws)) loadProfiles();
+  if (ws === "flow" && (!S.flowAt || Date.now() - S.flowAt > 120000)) { S.flowAt = Date.now(); loadFlowPrem(); }
   renderChartHead();
-  $("#wupd").textContent = etParts().hour + ":" + etParts().minute;
+  $("#wupd").title = "Quotes updated " + etParts().hour + ":" + etParts().minute + " ET";
 }
 
-function renderWatch(prev = {}) {
-  $("#wbody").innerHTML = S.watch.map((s) => {
-    const q = S.quotes[s] || {}, o = prev[s];
-    const fl = o && q.price != null && o.price != null && q.price !== o.price ? (q.price > o.price ? "flash-up" : "flash-down") : "";
-    const n = mentionCount(s);
-    return `<tr class="click ${s === S.sym ? "sel" : ""} ${fl}" data-sym="${esc(s)}">
+const WSORTS = [
+  ["manual", "Manual (drag rows)"], ["az", "Symbol A → Z"], ["chg_d", "% change ↓"], ["chg_a", "% change ↑"],
+  ["abs", "Biggest move (either way)"], ["ext", "Pre / after-hours move"], ["vol", "Volume"],
+  ["sector", "Group: sector"], ["industry", "Group: industry"], ["type", "Group: asset type"],
+  ["mentions", "Post mentions (24h)"], ["flow", "Unusual options $ (today)"],
+];
+const TYPE_LABEL = { EQUITY: "Stocks", ETF: "ETFs", INDEX: "Indices", FUTURE: "Futures", CRYPTOCURRENCY: "Crypto", CURRENCY: "FX", MUTUALFUND: "Funds" };
+
+function watchValue(mode, s) {
+  const q = S.quotes[s] || {};
+  switch (mode) {
+    case "chg_d": case "chg_a": return q.pct;
+    case "abs": return q.pct == null ? null : Math.abs(q.pct);
+    case "ext": return q.ext ? Math.abs(q.ext.pct) : null;
+    case "vol": return q.volume;
+    case "mentions": return mentionCount(s);
+    case "flow": return (S.flowPrem || {})[s] ?? null;
+  }
+  return null;
+}
+
+function sortSyms(syms, mode) {
+  if (mode === "manual" || !mode) return [...syms];
+  if (mode === "az") return [...syms].sort((a, b) => (LABELS[a] || a).localeCompare(LABELS[b] || b));
+  const dir = mode === "chg_a" ? 1 : -1;
+  return [...syms].sort((a, b) => {
+    const x = watchValue(mode, a), y = watchValue(mode, b);
+    if (x == null && y == null) return 0;
+    if (x == null) return 1;              // missing data always sinks to the bottom
+    if (y == null) return -1;
+    return (x - y) * dir;
+  });
+}
+
+function groupOf(mode, s) {
+  const p = S.profiles[s] || {};
+  if (mode === "sector") return p.sector || "Unclassified";
+  if (mode === "industry") return p.industry || p.sector || "Other";
+  return TYPE_LABEL[p.type] || p.type || "Other";
+}
+
+function watchRow(s, prev, mode) {
+  const q = S.quotes[s] || {}, o = prev[s], p = S.profiles[s] || {};
+  const fl = o && q.price != null && o.price != null && q.price !== o.price ? (q.price > o.price ? "flash-up" : "flash-down") : "";
+  const n = mentionCount(s);
+  const sub = mode === "sector" || mode === "type" ? (p.industry || q.name || "") : mode === "industry" ? (q.name || p.sector || "") : (q.name || "");
+  const extra = mode === "mentions" ? `${n} post${n === 1 ? "" : "s"}` : mode === "flow" && S.flowPrem && S.flowPrem[s] ? fmtMoney(S.flowPrem[s]) + " flow"
+    : mode === "vol" && q.volume ? fmtVol(q.volume) + " vol" : "";
+  return `<tr class="click ${s === S.sym ? "sel" : ""} ${fl}" data-sym="${esc(s)}" ${mode === "manual" ? 'draggable="true"' : ""}>
       <td><div class="wsym">${esc(LABELS[s] || s)}${n ? `<span class="dot" title="${n} post(s) mention this in 24h">●${n}</span>` : ""}</div>
-          <div class="wname">${esc(q.error ? "no data" : q.name || "")}</div></td>
+          <div class="wname">${esc(q.error ? "no data" : extra || sub)}</div></td>
       <td class="num">${fmtPx(q.price, s)}</td>
       <td class="num ${cls(q.pct)}">${fmtPct(q.pct)}${q.ext ? `<div class="ext ${cls(q.ext.pct)}">${q.ext.session === "pre" ? "PRE" : "AH"} ${fmtPct(q.ext.pct)}</div>` : ""}</td>
       <td class="spk">${spark(q.spark, (q.pct || 0) >= 0)}</td><td><span class="wdel" data-wdel="${esc(s)}" title="Remove from watchlist">✕</span></td></tr>`;
-  }).join("") || `<tr><td colspan="5" class="empty">Empty. Search a ticker above and press + WATCH.</td></tr>`;
+}
+
+function renderWatch(prev = {}) {
+  const mode = (S.ui && S.ui.watchSort) || "manual";
+  const sel = $("#wsort");
+  if (sel && sel.value !== mode) sel.value = mode;
+  if (!S.watch.length) { $("#wbody").innerHTML = `<tr><td colspan="5" class="empty">Empty. Search a ticker above and press + WATCH.</td></tr>`; return; }
+  if (!["sector", "industry", "type"].includes(mode)) {
+    $("#wbody").innerHTML = sortSyms(S.watch, mode).map((s) => watchRow(s, prev, mode)).join("");
+    return;
+  }
+  // Grouped view: one header per group with its average move, groups ordered strongest → weakest.
+  const groups = {};
+  for (const s of S.watch) (groups[groupOf(mode, s)] ||= []).push(s);
+  const avg = (syms) => { const v = syms.map((s) => (S.quotes[s] || {}).pct).filter((x) => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  const collapsed = S.ui.watchCollapsed || {};
+  const loadingProfiles = S.watch.some((s) => !S.profiles[s]);
+  $("#wbody").innerHTML = Object.entries(groups)
+    .map(([g, syms]) => [g, syms, avg(syms)])
+    .sort((a, b) => (b[2] ?? -1e9) - (a[2] ?? -1e9))
+    .map(([g, syms, a]) => {
+      const key = mode + ":" + g, shut = !!collapsed[key];
+      return `<tr class="wgrp" data-grp="${esc(key)}"><td colspan="5"><span class="caret">${shut ? "▸" : "▾"}</span> ${esc(g.toUpperCase())}
+        <span class="dim">${syms.length}</span> <span class="gavg ${cls(a)}">${a != null ? fmtPct(a) : ""}</span></td></tr>`
+        + (shut ? "" : sortSyms(syms, "chg_d").map((s) => watchRow(s, prev, mode)).join(""));
+    }).join("") + (loadingProfiles ? `<tr><td colspan="5" class="dim" style="padding:6px">Looking up sectors…</td></tr>` : "");
+}
+
+const fmtVol = (v) => (v >= 1e9 ? (v / 1e9).toFixed(1) + "B" : v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : v >= 1e3 ? Math.round(v / 1e3) + "K" : String(v));
+
+async function loadProfiles() {
+  const missing = S.watch.filter((s) => !S.profiles[s]);
+  if (!missing.length) return;
+  try { Object.assign(S.profiles, await api("profiles?symbols=" + encodeURIComponent(missing.join(",")))); } catch { return; }
+  for (const s of missing) S.profiles[s] ||= { symbol: s, sector: "Unclassified" };   // don't retry forever
+  renderWatch();
+}
+
+async function loadFlowPrem() {
+  try {
+    const d = await api("options/flow");
+    S.flowPrem = Object.fromEntries(d.summary.map((r) => [r.symbol, r.unusual_prem]));
+  } catch { S.flowPrem = {}; }
+  renderWatch();
+}
+
+function setWatchSort(mode) {
+  S.ui.watchSort = mode; saveUI();
+  if (["sector", "industry", "type"].includes(mode)) loadProfiles();
+  if (mode === "flow") loadFlowPrem();
+  renderWatch();
+}
+
+function bindWatchDrag() {
+  const body = $("#wbody");
+  let dragSym = null;
+  body.addEventListener("dragstart", (e) => {
+    const tr = e.target.closest("tr[data-sym]");
+    if (!tr) return;
+    dragSym = tr.dataset.sym;
+    e.dataTransfer.effectAllowed = "move";
+    tr.classList.add("dragging-row");
+  });
+  body.addEventListener("dragover", (e) => {
+    const tr = e.target.closest("tr[data-sym]");
+    if (!dragSym || !tr) return;
+    e.preventDefault();
+    $$(".drop-before, .drop-after", body).forEach((x) => x.classList.remove("drop-before", "drop-after"));
+    const r = tr.getBoundingClientRect();
+    tr.classList.add(e.clientY < r.top + r.height / 2 ? "drop-before" : "drop-after");
+  });
+  body.addEventListener("drop", (e) => {
+    const tr = e.target.closest("tr[data-sym]");
+    if (!dragSym || !tr || tr.dataset.sym === dragSym) return;
+    e.preventDefault();
+    const after = tr.classList.contains("drop-after");
+    const list = S.watch.filter((s) => s !== dragSym);
+    list.splice(list.indexOf(tr.dataset.sym) + (after ? 1 : 0), 0, dragSym);
+    S.watch = list;
+    saveSetting("watchlist", S.watch);
+    renderWatch();
+  });
+  body.addEventListener("dragend", () => {
+    dragSym = null;
+    $$(".dragging-row, .drop-before, .drop-after", body).forEach((x) => x.classList.remove("dragging-row", "drop-before", "drop-after"));
+  });
 }
 
 function renderTape() {
@@ -664,6 +795,7 @@ const TAB_RENDER = {
       ["NVDA  or  NVDA GO", "Chart a ticker (any Yahoo symbol: ^VIX, CL=F, BTC-USD, EURUSD=X)"],
       ["NVDA 1Y", "Chart with range: 1D 5D 1M 3M 6M 1Y 5Y"],
       ["ADD TSLA AMD", "Add to watchlist"], ["DEL TSLA", "Remove from watchlist"],
+      ["SORT SECTOR", "Sort / group the watchlist: SECTOR, INDUSTRY, TYPE, CHG, LOSERS, MOVERS, EXT, VOL, MENTIONS, FLOW, AZ, MANUAL"],
       ["NEWS  /  NEWS NVDA", "Market wire / ticker headlines"], ["CAL", "Economic calendar"],
       ["CONG  /  CONG NVDA  /  CONG PELOSI", "Congressional trades"], ["INS  /  INS NVDA  /  INS BUYS", "Insider trades"],
       ["13F", "Latest fund holdings filings"], ["PRED  /  KALSHI  /  PRED CRYPTO", "Prediction markets"],
@@ -815,6 +947,14 @@ function runCommand(raw) {
       S.ui.theme = key; S.ui.accent = ""; applyTheme(); saveUI(); return msg("Theme: " + THEMES[key].name);
     }
     case "SETTINGS": case "SET": case "PREFS": case "CONFIG": return openSettings();
+    case "SORT": {
+      const alias = { MANUAL: "manual", AZ: "az", "A-Z": "az", ALPHA: "az", CHG: "chg_d", UP: "chg_d", GAINERS: "chg_d", DOWN: "chg_a", LOSERS: "chg_a",
+        MOVE: "abs", MOVERS: "abs", EXT: "ext", PRE: "ext", AH: "ext", VOL: "vol", VOLUME: "vol", SECTOR: "sector", INDUSTRY: "industry",
+        TYPE: "type", MENTIONS: "mentions", POSTS: "mentions", FLOW: "flow", OPTIONS: "flow" };
+      const m = alias[rest[0]];
+      if (!m) return msg("SORT " + Object.keys(alias).join(" | "), !!rest[0]);
+      setWatchSort(m); return msg("Watchlist sorted: " + WSORTS.find((x) => x[0] === m)[1]);
+    }
     case "LAYOUT":
       S.ui.panels = { ...UI_DEFAULTS.panels }; S.ui.sizes = { ...UI_DEFAULTS.sizes }; S.ui.swap = false;
       applyLayout(); saveUI(); return msg("Layout reset");
@@ -873,6 +1013,8 @@ function bindEvents() {
 
   // delegated clicks: ticker chips & watchlist rows & tape
   document.addEventListener("click", (e) => {
+    const grp = e.target.closest("tr[data-grp]");
+    if (grp) { const c = (S.ui.watchCollapsed ||= {}); c[grp.dataset.grp] = !c[grp.dataset.grp]; saveUI(); renderWatch(); return; }
     const wd = e.target.closest("[data-wdel]");
     if (wd) { e.stopPropagation(); toggleWatch(wd.dataset.wdel); return; }
     if (e.target.closest("#fclear")) { e.preventDefault(); $("#fsearch").value = ""; searchPosts(""); return; }
@@ -931,8 +1073,14 @@ async function boot() {
   setSeg("#mkmode", S.mkmode);
   syncToggles();
   bindEvents();
+  bindWatchDrag();
   initChart();
   initUI();
+  $("#wsort").innerHTML = WSORTS.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("");
+  $("#wsort").value = S.ui.watchSort || "manual";
+  $("#wsort").addEventListener("change", (e) => setWatchSort(e.target.value));
+  if (["sector", "industry", "type"].includes(S.ui.watchSort)) loadProfiles();
+  if (S.ui.watchSort === "flow") loadFlowPrem();
   renderTabs();
   mergePosts(await api("posts?limit=600"));
   fillPeople();
