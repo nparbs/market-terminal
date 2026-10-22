@@ -1,0 +1,723 @@
+"use strict";
+
+/* ============================================================ state & utils */
+
+const S = {
+  cfg: null, watch: [], quotes: {}, posts: [], byId: {},
+  sym: "SPY", range: "5d", mkmode: "key", fperson: "", fsrc: "",
+  sel: null, tab: "news", sound: true, notify: false, customAlerts: [],
+  bars: [], gmt: 0, markerPosts: {}, sub: {},
+};
+
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const api = async (p) => { const r = await fetch("/api/" + p); return r.json(); };
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("mt." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("mt." + k, JSON.stringify(v)); } catch {} },
+};
+
+const LABELS = { "ES=F": "S&P FUT", "NQ=F": "NDX FUT", "^GSPC": "S&P 500", "^IXIC": "NASDAQ", "^DJI": "DOW", "^RUT": "R2K",
+  "^VIX": "VIX", "^TNX": "US10Y", "DX-Y.NYB": "DXY", "CL=F": "WTI", "GC=F": "GOLD", "BTC-USD": "BTC",
+  "EURUSD=X": "EUR/USD", "USDJPY=X": "USD/JPY", "USDCNY=X": "USD/CNY" };
+const SRC = { truth: "TRUTH", x: "X", rss: "OFFICIAL", gnews: "NEWS" };
+const PALETTE = ["#ff7a59", "#4aa8ff", "#2bd17e", "#c9a0ff", "#ffd166", "#5ce1e6", "#ff8fc7", "#a3e635", "#f59e0b", "#94a3b8"];
+const PERSON_COLORS = { "Donald Trump": "#ff7a59", "White House": "#ffb199", "Elon Musk": "#e7e7e7" };
+
+function personColor(name) {
+  if (PERSON_COLORS[name]) return PERSON_COLORS[name];
+  let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+}
+function fmtPx(v, sym = "") {
+  if (v == null || isNaN(v)) return "--";
+  const d = sym.endsWith("=X") ? 4 : Math.abs(v) >= 1 ? 2 : 4;
+  return v.toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+const fmtPct = (v, d = 2) => (v == null || isNaN(v) ? "--" : (v > 0 ? "+" : "") + v.toFixed(d) + "%");
+const cls = (v) => (v > 0 ? "up" : v < 0 ? "down" : "dim");
+
+const ET = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour12: false, weekday: "short",
+  year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+function etParts(d = new Date()) {
+  const o = {}; for (const p of ET.formatToParts(d)) o[p.type] = p.value;
+  o.hour = o.hour === "24" ? "00" : o.hour; return o;
+}
+function fmtET(ts, withDate) {
+  if (!ts) return "";
+  const p = etParts(new Date(ts * 1000)), n = etParts();
+  const t = `${p.hour}:${p.minute}`;
+  return !withDate && p.day === n.day && p.month === n.month ? t : `${p.month} ${p.day} ${t}`;
+}
+function ago(ts) {
+  const s = Date.now() / 1000 - ts;
+  if (s < 60) return "now"; if (s < 3600) return Math.floor(s / 60) + "m"; if (s < 86400) return Math.floor(s / 3600) + "h";
+  return Math.floor(s / 86400) + "d";
+}
+function msg(t, isErr) { const m = $("#cmdmsg"); m.textContent = t; m.style.color = isErr ? "var(--down)" : ""; }
+
+/* ============================================================ clock & market status */
+
+function tickClock() {
+  const p = etParts();
+  $("#clock").textContent = `${p.weekday} ${p.hour}:${p.minute}:${p.second} ET`;
+  const mins = +p.hour * 60 + +p.minute, wk = !["Sat", "Sun"].includes(p.weekday);
+  const el = $("#mkt");
+  let st = "CLOSED", c = "closed";
+  if (wk && mins >= 570 && mins < 960) { st = "MKT OPEN"; c = "open"; }
+  else if (wk && mins >= 240 && mins < 570) { st = "PRE-MKT"; c = "ext"; }
+  else if (wk && mins >= 960 && mins < 1200) { st = "AFTER-HRS"; c = "ext"; }
+  el.textContent = st; el.className = c;
+}
+
+/* ============================================================ quotes, watchlist, tape */
+
+function spark(vals, up) {
+  if (!vals || vals.length < 2) return "";
+  const w = 54, h = 18, mn = Math.min(...vals), mx = Math.max(...vals), r = mx - mn || 1;
+  const pts = vals.map((v, i) => `${(i / (vals.length - 1) * w).toFixed(1)},${(h - (v - mn) / r * h).toFixed(1)}`).join(" ");
+  return `<svg class="spark" width="${w}" height="${h}"><polyline fill="none" stroke="${up ? "var(--up)" : "var(--down)"}" stroke-width="1.2" points="${pts}"/></svg>`;
+}
+
+function mentionCount(sym) {
+  const since = Date.now() / 1000 - 86400;
+  return S.posts.filter((p) => p.ts > since && p.source !== "gnews" && p.tickers.includes(sym)).length;
+}
+
+async function refreshQuotes() {
+  const syms = [...new Set([...S.watch, ...S.cfg.tape, S.sym])];
+  let qs;
+  try { qs = await api("quotes?symbols=" + encodeURIComponent(syms.join(","))); } catch { return; }
+  const prev = S.quotes;
+  S.quotes = {};
+  for (const q of qs) S.quotes[q.symbol] = q;
+  renderWatch(prev);
+  renderTape();
+  renderChartHead();
+  $("#wupd").textContent = etParts().hour + ":" + etParts().minute;
+}
+
+function renderWatch(prev = {}) {
+  $("#wbody").innerHTML = S.watch.map((s) => {
+    const q = S.quotes[s] || {}, o = prev[s];
+    const fl = o && q.price != null && o.price != null && q.price !== o.price ? (q.price > o.price ? "flash-up" : "flash-down") : "";
+    const n = mentionCount(s);
+    return `<tr class="click ${s === S.sym ? "sel" : ""} ${fl}" data-sym="${esc(s)}">
+      <td><div class="wsym">${esc(LABELS[s] || s)}${n ? `<span class="dot" title="${n} post(s) mention this in 24h">●${n}</span>` : ""}</div>
+          <div class="wname">${esc(q.error ? "no data" : q.name || "")}</div></td>
+      <td class="num">${fmtPx(q.price, s)}</td>
+      <td class="num ${cls(q.pct)}">${fmtPct(q.pct)}</td>
+      <td>${spark(q.spark, (q.pct || 0) >= 0)}</td></tr>`;
+  }).join("") || `<tr><td colspan="4" class="empty">Empty. Type ADD NVDA</td></tr>`;
+}
+
+function renderTape() {
+  $("#tapeinner").innerHTML = S.cfg.tape.map((s) => {
+    const q = S.quotes[s] || {};
+    return `<span class="tp" data-sym="${esc(s)}"><b>${esc(LABELS[s] || s)}</b>${fmtPx(q.price, s)} <span class="${cls(q.pct)}">${fmtPct(q.pct)}</span></span>`;
+  }).join("");
+}
+
+/* ============================================================ chart */
+
+let chart, candles, volume;
+
+function initChart() {
+  const LC = window.LightweightCharts;
+  chart = LC.createChart($("#chart"), {
+    autoSize: true,
+    layout: { background: { type: "solid", color: "#000" }, textColor: "#8b949e", fontFamily: "IBM Plex Mono, Consolas, monospace", fontSize: 11 },
+    grid: { vertLines: { color: "#0d1013" }, horzLines: { color: "#0d1013" } },
+    rightPriceScale: { borderColor: "#1d2227" },
+    timeScale: { borderColor: "#1d2227", timeVisible: true, secondsVisible: false },
+    crosshair: { mode: 0 },
+  });
+  candles = chart.addCandlestickSeries({ upColor: "#2bd17e", downColor: "#ff4d4f", borderVisible: false, wickUpColor: "#2bd17e", wickDownColor: "#ff4d4f" });
+  volume = chart.addHistogramSeries({ priceFormat: { type: "volume" }, priceScaleId: "vol", color: "#1f2a33" });
+  chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+
+  chart.subscribeCrosshairMove((p) => {
+    const tip = $("#tip");
+    const posts = p.time && S.markerPosts[p.time];
+    if (!posts || !p.point) { tip.style.display = "none"; return; }
+    tip.innerHTML = posts.slice(0, 3).map((x) => `<div class="tp-p"><div class="tp-h">${esc(fmtET(x.ts, true))} · ${esc(x.person)}</div>${esc(x.text.slice(0, 220))}</div>`).join("")
+      + (posts.length > 3 ? `<div class="dim">+${posts.length - 3} more</div>` : "");
+    const box = $("#chartbox").getBoundingClientRect();
+    tip.style.display = "block";
+    tip.style.left = Math.min(p.point.x + 14, box.width - 350) + "px";
+    tip.style.top = Math.max(4, p.point.y - 30) + "px";
+  });
+  chart.subscribeClick((p) => {
+    const posts = p.time && S.markerPosts[p.time];
+    if (posts) selectPost(posts[0].id, true);
+  });
+}
+
+async function loadChart(sym, range) {
+  S.sym = sym.toUpperCase();
+  if (range) S.range = range;
+  $$("#ranges button").forEach((b) => b.classList.toggle("on", b.dataset.v === S.range));
+  $("#csym").textContent = LABELS[S.sym] || S.sym;
+  $("#cname").textContent = "loading…";
+  renderWatch();
+  const d = await api(`chart?symbol=${encodeURIComponent(S.sym)}&range=${S.range}`);
+  if (d.error || !d.bars || !d.bars.length) {
+    $("#cname").textContent = "no data for " + S.sym; candles.setData([]); volume.setData([]); S.bars = [];
+    msg("No chart data for " + S.sym, true); return;
+  }
+  S.gmt = d.gmtoffset || 0;
+  S.bars = d.bars;
+  candles.setData(d.bars.map((b) => ({ time: b.time + S.gmt, open: b.open, high: b.high, low: b.low, close: b.close })));
+  volume.setData(d.bars.map((b) => ({ time: b.time + S.gmt, value: b.volume, color: b.close >= b.open ? "#123d29" : "#4a1a1b" })));
+  chart.timeScale().fitContent();
+  $("#cname").textContent = d.name || "";
+  renderChartHead();
+  updateMarkers();
+  if (!S.quotes[S.sym]) refreshQuotes();
+  if (S.tab === "news" && S.sub.newsSym) renderTab();
+  if (S.tab === "ins" && S.sub.insMode === "sym") renderTab();
+}
+
+function renderChartHead() {
+  const q = S.quotes[S.sym];
+  if (!q) return;
+  $("#cpx").textContent = fmtPx(q.price, S.sym);
+  $("#cchg").innerHTML = `<span class="${cls(q.change)}">${q.change != null ? (q.change > 0 ? "+" : "") + fmtPx(q.change, S.sym) : ""} ${fmtPct(q.pct)}</span>`;
+}
+
+function markerCandidates() {
+  if (S.mkmode === "off" || !S.bars.length) return [];
+  const t0 = S.bars[0].time;
+  // KEY = posts tagged with this ticker, plus alert-level posts straight from people (Truth Social / X)
+  return S.posts.filter((p) => p.ts >= t0 && (S.mkmode === "all" || p.tickers.includes(S.sym)
+    || (isAlert(p) && (p.source === "truth" || p.source === "x"))));
+}
+
+function updateMarkers() {
+  S.markerPosts = {};
+  const bars = S.bars;
+  if (!bars.length) { candles.setMarkers([]); return; }
+  for (const p of markerCandidates()) {
+    let lo = 0, hi = bars.length - 1;           // last bar starting at or before the post
+    while (lo < hi) { const m = (lo + hi + 1) >> 1; if (bars[m].time <= p.ts) lo = m; else hi = m - 1; }
+    const t = bars[lo].time + S.gmt;
+    (S.markerPosts[t] ||= []).push(p);
+  }
+  const markers = Object.entries(S.markerPosts).map(([t, ps]) => {
+    const alert = ps.some(isAlert), sel = ps.some((p) => p.id === S.sel);
+    const initials = [...new Set(ps.map((p) => p.person.split(/\s+/).map((w) => w[0]).join("").slice(0, 2)))].join(",");
+    return { time: +t, position: "aboveBar", shape: "arrowDown", size: sel ? 2 : 1,
+      color: sel ? "#ffa028" : alert ? "#ff3b3b" : personColor(ps[0].person), text: initials + (ps.length > 1 ? `×${ps.length}` : "") };
+  }).sort((a, b) => a.time - b.time);
+  candles.setMarkers(markers);
+}
+
+/* ============================================================ feed */
+
+function customMatch(p) {
+  const t = (p.text || "").toLowerCase();
+  return S.customAlerts.find((k) => new RegExp(`(^|[^a-z0-9])${k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-z0-9]|$)`).test(t));
+}
+const isAlert = (p) => p.alert || !!customMatch(p);
+
+function filteredPosts() {
+  return S.posts.filter((p) => (!S.fperson || p.person === S.fperson)
+    && (S.fsrc !== "direct" || p.source !== "gnews")
+    && (S.fsrc !== "alert" || isAlert(p)));
+}
+
+function impactLine(p) {
+  const im = p.impact && p.impact.tickers;
+  if (!im) return "";
+  const b = S.cfg.benchmark;
+  const order = [b, ...Object.keys(im).filter((t) => t !== b)].filter((t) => im[t] && !im[t].error).slice(0, 3);
+  if (!order.length) return "";
+  const parts = order.map((t) => {
+    const v = im[t];
+    const cells = ["r5", "r30", "r60"].filter((k) => v[k] != null).map((k) => `${k.slice(1)}m <b class="${cls(v[k])}">${fmtPct(v[k])}</b>`).join(" ");
+    return cells ? `${esc(t)} ${cells}` : "";
+  }).filter(Boolean);
+  if (!parts.length) return `<div class="imp">Δ ${p.impact.session === "pending" ? "measured after the next market open" : "waiting for market data…"}</div>`;
+  const sess = p.impact.session === "next-open" ? " <span title='Posted while market closed: measured from prior close to after next open'>(next open)</span>" : "";
+  return `<div class="imp">Δ ${parts.join(" · ")}${sess}</div>`;
+}
+
+function postHTML(p) {
+  const al = isAlert(p);
+  return `<div class="post ${al ? "alert" : ""} ${p.id === S.sel ? "sel" : ""}" data-id="${esc(p.id)}">
+    <div class="pmeta">
+      <span class="ptime" title="${esc(fmtET(p.ts, true))} ET">${esc(fmtET(p.ts))}</span>
+      <span class="pwho" style="color:${personColor(p.person)}">${esc(p.person)}</span>
+      <span class="badge b-${esc(p.source)}">${SRC[p.source] || p.source}</span>
+      ${al ? `<span class="badge b-alert">ALERT</span>` : ""}
+      <span class="sp" style="flex:1"></span>
+      <span class="dim">${ago(p.ts)}</span>
+      ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener" title="Open original">↗</a>` : ""}
+    </div>
+    <div class="ptext">${esc(p.text)}</div>
+    ${p.tickers.length || p.categories.length ? `<div class="ptags">${p.tickers.map((t) => `<span class="chip" data-sym="${esc(t)}">${esc(t)}</span>`).join("")}${p.categories.map((c) => `<span class="cat">${esc(c)}</span>`).join("")}</div>` : ""}
+    ${impactLine(p)}
+  </div>`;
+}
+
+function renderFeed() {
+  const list = filteredPosts().slice(0, 300);
+  const el = $("#feed"), top = el.scrollTop;
+  el.innerHTML = list.map(postHTML).join("") || `<div class="empty">No posts yet for this filter. Sources poll every 30s-10m.</div>`;
+  el.scrollTop = top;
+  $("#fcount").textContent = `${list.length}`;
+}
+
+function mergePosts(list) {
+  for (const p of list) { S.byId[p.id] = Object.assign(S.byId[p.id] || {}, p); }
+  S.posts = Object.values(S.byId).sort((a, b) => b.ts - a.ts);
+}
+
+function fillPeople() {
+  const people = [...new Set([...S.cfg.people, ...S.posts.map((p) => p.person)])].sort();
+  const sel = $("#fperson");
+  sel.innerHTML = `<option value="">All people (${people.length})</option>` + people.map((p) => `<option ${p === S.fperson ? "selected" : ""}>${esc(p)}</option>`).join("");
+}
+
+async function reloadPosts() {
+  try { mergePosts(await api("posts?limit=600")); } catch { return; }
+  renderFeed(); updateMarkers(); renderWatch();
+}
+
+function selectPost(id, fromChart) {
+  S.sel = id;
+  $$(".post").forEach((e) => e.classList.toggle("sel", e.dataset.id === id));
+  if (fromChart) {
+    const el = $(`.post[data-id="${CSS.escape(id)}"]`);
+    if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+  updateMarkers();
+  showTab("impact");
+}
+
+/* ============================================================ alerts & live stream */
+
+let audioCtx = null;
+function beep() {
+  if (!S.sound) return;
+  try {
+    audioCtx ||= new (window.AudioContext || window.webkitAudioContext)();
+    [[880, 0], [660, 0.16], [880, 0.32]].forEach(([f, t]) => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.frequency.value = f; o.type = "square"; g.gain.value = 0.06;
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(audioCtx.currentTime + t); o.stop(audioCtx.currentTime + t + 0.12);
+    });
+  } catch {}
+}
+
+let titleTimer = null;
+function fireAlert(p) {
+  beep();
+  msg(`⚠ ${p.person}: ${p.text.slice(0, 120)}`);
+  if (S.notify && "Notification" in window && Notification.permission === "granted") {
+    try {
+      const n = new Notification(`⚠ ${p.person} (${SRC[p.source] || p.source})`, { body: p.text.slice(0, 240) + (p.tickers.length ? `\n${p.tickers.join(" ")}` : ""), tag: p.id });
+      n.onclick = () => { window.focus(); selectPost(p.id, true); };
+    } catch {}
+  }
+  clearInterval(titleTimer);
+  let n = 0;
+  titleTimer = setInterval(() => {
+    document.title = n % 2 ? "Market Terminal" : `⚠ ${p.person.toUpperCase()} POSTED`;
+    if (++n > 30) { clearInterval(titleTimer); document.title = "Market Terminal"; }
+  }, 1000);
+}
+
+function connectStream() {
+  const es = new EventSource("/api/stream");
+  es.onopen = () => { $("#conn").className = "ok"; };
+  es.onerror = () => { $("#conn").className = "bad"; };
+  es.onmessage = (e) => {
+    let ev; try { ev = JSON.parse(e.data); } catch { return; }
+    if (ev.type !== "post") return;
+    const p = ev.post;
+    if (S.byId[p.id]) return;
+    mergePosts([p]);
+    renderFeed(); updateMarkers(); renderWatch();
+    if (!S.cfg.people.includes(p.person)) { S.cfg.people.push(p.person); fillPeople(); }
+    const fresh = Date.now() / 1000 - p.ts < 1800;
+    const el = $(`.post[data-id="${CSS.escape(p.id)}"]`);
+    if (p.notify || (fresh && customMatch(p) && p.source !== "gnews")) {
+      if (el) el.classList.add("newalert");
+      fireAlert(p);
+    } else if (el) el.classList.add("new");
+  };
+}
+
+/* ============================================================ bottom tabs */
+
+const TABS = [
+  ["news", "NEWS"], ["cal", "ECO CAL"], ["cong", "CONGRESS"], ["ins", "INSIDERS"], ["f13", "13F"],
+  ["pred", "PREDICT"], ["track", "TRACK REC"], ["impact", "POST IMPACT"], ["status", "SOURCES"], ["help", "HELP"],
+];
+
+function renderTabs() {
+  $("#tabs").innerHTML = TABS.map(([id, label], i) => `<button data-tab="${id}" class="${S.tab === id ? "on" : ""}" title="Alt+${(i + 1) % 10}"><span class="k">${(i + 1) % 10}</span>${label}</button>`).join("");
+}
+
+function showTab(id) { S.tab = id; store.set("tab", id); renderTabs(); renderTab(); }
+
+function seg(name, opts, cur) {
+  return `<span class="seg" data-seg="${name}">${opts.map(([v, l]) => `<button data-v="${esc(v)}" class="${v === cur ? "on" : ""}">${esc(l)}</button>`).join("")}</span>`;
+}
+const chip = (t) => (t ? `<span class="chip" data-sym="${esc(t)}">${esc(t)}</span>` : `<span class="dim">--</span>`);
+const loading = () => { $("#tabbody").innerHTML = `<div class="empty">Loading…</div>`; };
+const errBox = (d) => `<div class="empty">Source unavailable: ${esc(d.error)}<br>Free sources sometimes rate-limit or change layout; it will retry on next refresh.</div>`;
+
+let tabSeq = 0;
+async function renderTab() {
+  const id = S.tab, my = ++tabSeq;
+  const bar = $("#tabbar2"), body = $("#tabbody");
+  const fn = TAB_RENDER[id];
+  if (!fn) return;
+  try {
+    await fn(bar, body, () => my === tabSeq);
+  } catch (e) {
+    if (my === tabSeq) body.innerHTML = `<div class="empty">Error: ${esc(e.message)}</div>`;
+  }
+}
+
+const TAB_RENDER = {
+  async news(bar, body, live) {
+    const symMode = !!S.sub.newsSym;
+    bar.innerHTML = seg("newsSym", [["", "MARKET WIRE"], ["1", `${S.sym} HEADLINES`]], symMode ? "1" : "");
+    loading();
+    const d = await api(symMode ? "news?symbol=" + encodeURIComponent(S.sym) : "news");
+    if (!live()) return;
+    if (d.error) { body.innerHTML = errBox(d); return; }
+    body.innerHTML = `<table><thead><tr><th>TIME ET</th><th>SRC</th><th>HEADLINE</th><th>TICKERS</th></tr></thead><tbody>${d.map((n) => `
+      <tr><td class="dim" style="white-space:nowrap">${esc(fmtET(n.ts))}</td><td class="dim">${esc(n.source)}</td>
+      <td class="wrap"><a href="${esc(n.url)}" target="_blank" rel="noopener" class="${n.alert ? "down" : ""}" style="${n.alert ? "" : "color:var(--text)"}">${esc(n.title)}</a></td>
+      <td>${(n.tickers || []).slice(0, 4).map(chip).join(" ")}</td></tr>`).join("")}</tbody></table>`;
+  },
+
+  async cal(bar, body, live) {
+    const cc = S.sub.calCountry ?? "USD", imp = S.sub.calImp ?? "hm";
+    bar.innerHTML = seg("calCountry", [["USD", "USD"], ["", "ALL"]], cc) + seg("calImp", [["hm", "HIGH+MED"], ["", "ALL"]], imp)
+      + `<span class="dim">This week · times ET</span>`;
+    loading();
+    const d = await api("calendar");
+    if (!live()) return;
+    if (d.error) { body.innerHTML = errBox(d); return; }
+    const now = Date.now() / 1000;
+    const rows = d.filter((e) => (!cc || e.country === cc) && (!imp || ["High", "Medium"].includes(e.impact)));
+    const nextIdx = rows.findIndex((e) => e.ts > now);
+    let lastDay = "";
+    body.innerHTML = `<table><thead><tr><th>DAY</th><th>TIME</th><th>CCY</th><th>IMPACT</th><th>EVENT</th><th class="num">ACTUAL</th><th class="num">FCST</th><th class="num">PREV</th></tr></thead><tbody>${rows.map((e, i) => {
+      const p = etParts(new Date(e.ts * 1000)), day = `${p.weekday} ${p.month} ${p.day}`;
+      const show = day !== lastDay; lastDay = day;
+      return `<tr class="${e.ts < now ? "past" : ""} ${i === nextIdx ? "next" : ""}"><td class="amber">${show ? day : ""}</td><td>${p.hour}:${p.minute}</td><td>${esc(e.country)}</td>
+        <td class="imp-${esc(e.impact)}">${esc(e.impact)}</td><td>${esc(e.title)}</td><td class="num">${esc(e.actual || "")}</td><td class="num dim">${esc(e.forecast || "")}</td><td class="num dim">${esc(e.previous || "")}</td></tr>`;
+    }).join("")}</tbody></table>` + (rows.length ? "" : `<div class="empty">No events for this filter.</div>`);
+  },
+
+  async cong(bar, body, live) {
+    const q = S.sub.congQ || "", txn = S.sub.congTxn || "";
+    bar.innerHTML = `<input class="f" id="congq" placeholder="ticker or member" value="${esc(q)}" style="width:170px">`
+      + seg("congTxn", [["", "ALL"], ["Purchase", "BUYS"], ["Sale", "SALES"]], txn)
+      + `<span class="dim">Recent disclosures via Quiver Quant · STOCK Act filings lag trades by up to 45 days</span>`;
+    loading();
+    const d = await api("congress");
+    if (!live()) return;
+    if (d.error) { body.innerHTML = errBox(d); return; }
+    const ql = q.toLowerCase();
+    const rows = d.filter((r) => (!txn || r.txn.startsWith(txn)) && (!q || (r.ticker || "").toLowerCase() === ql || r.member.toLowerCase().includes(ql)));
+    body.innerHTML = `<table><thead><tr><th>TRADED</th><th>FILED</th><th>MEMBER</th><th>TICKER</th><th>TXN</th><th>AMOUNT</th><th>ASSET</th><th class="num">XS RET</th></tr></thead><tbody>${rows.map((r) => `
+      <tr><td>${esc(r.traded)}</td><td class="dim">${esc(r.filed)}</td>
+      <td><span class="party-${esc(r.party)}">${esc(r.member)}</span> <span class="dim">${esc(r.party)}-${esc(r.chamber[0] || "")}</span></td>
+      <td>${chip(r.ticker)}</td><td class="${r.txn.startsWith("Purchase") ? "up" : r.txn.startsWith("Sale") ? "down" : ""}">${esc(r.txn)}</td>
+      <td>${esc(r.amount)}</td><td class="dim" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.asset)}</td>
+      <td class="num ${cls(r.excess_return)}" title="Return vs SPY since trade">${r.excess_return != null ? fmtPct(r.excess_return, 1) : ""}</td></tr>`).join("")}</tbody></table>`
+      + (rows.length ? "" : `<div class="empty">No matching trades in the latest 300 disclosures.</div>`);
+    const inp = $("#congq");
+    inp.onchange = () => { S.sub.congQ = inp.value.trim(); renderTab(); };
+  },
+
+  async ins(bar, body, live) {
+    const mode = S.sub.insMode || "latest";
+    bar.innerHTML = seg("insMode", [["latest", "LATEST"], ["buys", "BUYS $25K+"], ["big", "BUYS $100K+"], ["cluster", "CLUSTER BUYS"], ["sym", `${S.sym} ONLY`]], mode)
+      + `<span class="dim">SEC Form 4 via OpenInsider</span>`;
+    loading();
+    const d = await api(mode === "sym" ? "insiders?ticker=" + encodeURIComponent(S.sym) : "insiders?mode=" + mode);
+    if (!live()) return;
+    if (d.error) { body.innerHTML = errBox(d); return; }
+    body.innerHTML = `<table><thead><tr><th>FILED</th><th>TRADED</th><th>TICKER</th><th>COMPANY</th><th>INSIDER</th><th>TITLE</th><th>TYPE</th><th class="num">PRICE</th><th class="num">QTY</th><th class="num">ΔOWN</th><th class="num">VALUE</th></tr></thead><tbody>${d.map((r) => `
+      <tr><td class="dim" style="white-space:nowrap">${esc(r.filed)}</td><td>${esc(r.traded)}</td><td>${chip(r.ticker)}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.company)}</td><td>${esc(r.insider)}</td><td class="dim">${esc(r.title)}</td>
+      <td class="${r.type.startsWith("P") ? "up" : r.type.startsWith("S") ? "down" : ""}">${esc(r.type)}</td>
+      <td class="num">${esc(r.price)}</td><td class="num">${esc(r.qty)}</td><td class="num">${esc(r.delta_own)}</td><td class="num ${r.value.startsWith("-") ? "down" : "up"}">${esc(r.value)}</td></tr>`).join("")}</tbody></table>`
+      + (d.length ? "" : `<div class="empty">No insider filings found.</div>`);
+  },
+
+  async f13(bar, body, live) {
+    bar.innerHTML = `<span class="dim">Latest 13F-HR filings (quarterly fund holdings) from SEC EDGAR · click to open the filing</span>`;
+    loading();
+    const d = await api("13f");
+    if (!live()) return;
+    if (d.error) { body.innerHTML = errBox(d); return; }
+    body.innerHTML = `<table><thead><tr><th>FILED ET</th><th>FORM</th><th>FILER</th><th>CIK</th></tr></thead><tbody>${d.map((r) => `
+      <tr><td class="dim">${esc(fmtET(r.ts, true))}</td><td>${esc(r.form)}</td><td><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.filer)}</a></td><td class="dim">${esc(r.cik)}</td></tr>`).join("")}</tbody></table>`;
+  },
+
+  async pred(bar, body, live) {
+    const venue = S.sub.predVenue || "poly", tag = S.sub.predTag || "economy";
+    const tags = ["economy", "fed-rates", "finance", "business", "tariffs", "crypto", "politics", "geopolitics"];
+    bar.innerHTML = seg("predVenue", [["poly", "POLYMARKET"], ["kalshi", "KALSHI"]], venue)
+      + (venue === "poly" ? seg("predTag", tags.map((t) => [t, t.toUpperCase()]), tag) : `<span class="dim">Fed, CPI, jobs, GDP, recession, S&P, Nasdaq, oil, BTC</span>`);
+    loading();
+    const d = await api(venue === "kalshi" ? "predictions?venue=kalshi" : "predictions?tag=" + tag);
+    if (!live()) return;
+    if (d.error) { body.innerHTML = errBox(d); return; }
+    body.innerHTML = `<div class="pcards">${d.map((e) => `
+      <div class="pcard"><h4><a href="${esc(e.url)}" target="_blank" rel="noopener" style="color:#fff">${esc(e.title)}</a></h4>
+      <div class="meta">${e.volume24h ? "24h vol $" + Math.round(e.volume24h).toLocaleString() : esc(e.series || "")}${e.end ? " · ends " + esc(e.end) : ""}</div>
+      ${e.markets.map((m) => `<div class="prow"><div class="lbl"><div class="bar" style="width:${(m.yes * 100).toFixed(1)}%"></div><span>${esc(m.label)}</span></div>
+        <div class="num" style="color:#fff">${(m.yes * 100).toFixed(m.yes < 0.01 ? 1 : 0)}%</div>
+        <div class="num ${cls(m.change)}">${m.change ? (m.change > 0 ? "+" : "") + (m.change * 100).toFixed(1) : ""}</div></div>`).join("")}
+      </div>`).join("")}</div>` + (d.length ? "" : `<div class="empty">No open markets.</div>`);
+  },
+
+  async track(bar, body, live) {
+    bar.innerHTML = `<span class="dim">How the benchmark (${esc(S.cfg.benchmark)}) moved after each person's posts. Builds up as the terminal runs; intraday data covers ~58 days.</span>`;
+    loading();
+    const d = await api("trackrecord");
+    if (!live()) return;
+    const c = (v) => `<td class="num ${cls(v)}">${v != null ? fmtPct(v, 3) : "--"}</td>`;
+    const pct = (v) => `<td class="num">${v != null ? v + "%" : "--"}</td>`;
+    body.innerHTML = `
+      <div class="detail"><div class="amber">BY PERSON</div>
+      <table><thead><tr><th>PERSON</th><th class="num">POSTS</th><th class="num">AVG 5M</th><th class="num">AVG 30M</th><th class="num">AVG 60M</th><th class="num">AVG |30M|</th><th class="num">% UP 30M</th></tr></thead><tbody>
+      ${d.people.map((r) => `<tr class="click" data-person="${esc(r.person)}"><td style="color:${personColor(r.person)}">${esc(r.person)}</td><td class="num">${r.n}</td>${c(r.avg5)}${c(r.avg30)}${c(r.avg60)}<td class="num">${r.abs30 != null ? r.abs30.toFixed(3) + "%" : "--"}</td>${pct(r.up30)}</tr>`).join("")}
+      </tbody></table>
+      <div class="amber" style="margin-top:12px">BY PERSON × TOPIC <span class="dim">(2+ posts, sorted by avg 30m move)</span></div>
+      <table><thead><tr><th>PERSON</th><th>TOPIC</th><th class="num">N</th><th class="num">AVG 5M</th><th class="num">AVG 30M</th><th class="num">AVG 60M</th><th class="num">% UP 30M</th></tr></thead><tbody>
+      ${d.categories.map((r) => `<tr><td style="color:${personColor(r.person)}">${esc(r.person)}</td><td>${esc(r.category)}</td><td class="num">${r.n}</td>${c(r.avg5)}${c(r.avg30)}${c(r.avg60)}${pct(r.up30)}</tr>`).join("")}
+      </tbody></table>
+      <div class="amber" style="margin-top:12px">BIGGEST MOVES AFTER A POST <span class="dim">(largest move in any tagged ticker)</span></div>
+      <table><thead><tr><th>WHEN</th><th>PERSON</th><th>TICKER</th><th class="num">MOVE</th><th>POST</th></tr></thead><tbody>
+      ${d.movers.map((m) => `<tr class="click" data-post="${esc(m.id)}"><td class="dim" style="white-space:nowrap">${esc(fmtET(m.ts, true))}</td><td style="color:${personColor(m.person)}">${esc(m.person)}</td><td>${chip(m.ticker)}</td>${c(m.move)}<td class="wrap">${esc(m.text.slice(0, 140))}</td></tr>`).join("")}
+      </tbody></table>
+      ${d.people.length ? "" : `<div class="empty">No measurements yet. Impact is computed a few minutes after each post (or after the next open for off-hours posts).</div>`}
+      <div class="note">Correlation, not causation: a single post's move is mixed with everything else happening in the market. Averages get meaningful after dozens of posts.</div></div>`;
+  },
+
+  async impact(bar, body, live) {
+    bar.innerHTML = "";
+    if (!S.sel) { body.innerHTML = `<div class="empty">Click a post in the feed (or a marker on the chart) to see how the market reacted.</div>`; return; }
+    const cached = S.byId[S.sel];
+    const draw = (p) => {
+      const im = p.impact || {}, tk = im.tickers || {};
+      const order = [S.cfg.benchmark, ...Object.keys(tk).filter((t) => t !== S.cfg.benchmark)];
+      const c = (v) => `<td class="num ${cls(v)}">${v != null ? fmtPct(v, 2) : `<span class="dim">pending</span>`}</td>`;
+      bar.innerHTML = `<span style="color:${personColor(p.person)};font-weight:700">${esc(p.person)}</span><span class="badge b-${esc(p.source)}">${SRC[p.source] || ""}</span>
+        <span class="dim">${esc(fmtET(p.ts, true))} ET</span>${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">open original ↗</a>` : ""}`;
+      body.innerHTML = `<div class="detail">
+        <div class="dtext">${esc(p.text)}</div>
+        <div class="ptags">${p.tickers.map((t) => `<span class="chip" data-sym="${esc(t)}">${esc(t)}</span>`).join("")}${p.categories.map((x) => `<span class="cat">${esc(x)}</span>`).join("")}
+          ${p.matched.length ? `<span class="dim">matched: ${esc(p.matched.join(", "))}</span>` : ""}</div>
+        <table style="margin-top:10px"><thead><tr><th>TICKER</th><th class="num">+5 MIN</th><th class="num">+30 MIN</th><th class="num">+60 MIN</th><th class="num">PEAK 60M</th></tr></thead><tbody>
+        ${order.filter((t) => tk[t]).map((t) => tk[t].error ? `<tr><td>${chip(t)}</td><td colspan="4" class="dim">${esc(tk[t].error)}</td></tr>`
+          : `<tr><td>${chip(t)}</td>${c(tk[t].r5)}${c(tk[t].r30)}${c(tk[t].r60)}${c(tk[t].peak)}</tr>`).join("")}
+        </tbody></table>
+        <div class="note">${im.session === "next-open" ? "Posted while the US market was closed: moves are measured from the prior close to 5/30/60 minutes after the next open (so they include the opening gap)."
+          : im.session === "live" ? "Posted during market hours: moves are measured from the last price before the post." : "Measurement starts once the market has traded after this post."}
+          ${Object.keys(tk).length ? "" : " No measurement yet (posts older than ~58 days or without market data can't be measured)."}</div></div>`;
+    };
+    if (cached) draw(cached);
+    const fresh = await api("post/" + encodeURIComponent(S.sel));
+    if (!live() || fresh.error) return;
+    mergePosts([fresh]);
+    draw(S.byId[S.sel]);
+  },
+
+  async status(bar, body, live) {
+    bar.innerHTML = `<span class="dim">Health of every data source. Errors usually mean a free source rate-limited us; it retries automatically.</span>`;
+    const d = await api("status");
+    if (!live()) return;
+    body.innerHTML = `<table><thead><tr><th></th><th>SOURCE</th><th>TYPE</th><th>LAST CHECK</th><th class="num">NEW</th><th>NOTE</th></tr></thead><tbody>${Object.values(d).map((s) => `
+      <tr><td class="${s.ok ? "up" : s.ok === false ? "down" : "dim"}">●</td><td style="color:${personColor(s.person)}">${esc(s.person)}</td><td class="dim">${esc(SRC[s.type] || s.type)}</td>
+      <td class="dim">${s.last ? ago(s.last) + " ago" : "--"}</td><td class="num">${s.new ?? ""}</td><td class="${s.ok ? "dim" : "down"}">${esc(s.error || "ok")}</td></tr>`).join("")}</tbody></table>
+      ${S.cfg.x_enabled ? "" : `<div class="note" style="padding:0 8px 10px">X/Twitter: no API token set, so X accounts are tracked through news coverage (NEWS badge). To get posts directly, set an X API bearer token (env X_BEARER_TOKEN or "x_bearer_token" in config.json), or add an RSS feed for an account (e.g. from rss.app) as an "rss" source.</div>`}`;
+  },
+
+  async help(bar, body) {
+    bar.innerHTML = "";
+    const h = [
+      ["NVDA  or  NVDA GO", "Chart a ticker (any Yahoo symbol: ^VIX, CL=F, BTC-USD, EURUSD=X)"],
+      ["NVDA 1Y", "Chart with range: 1D 5D 1M 3M 6M 1Y 5Y"],
+      ["ADD TSLA AMD", "Add to watchlist"], ["DEL TSLA", "Remove from watchlist"],
+      ["NEWS  /  NEWS NVDA", "Market wire / ticker headlines"], ["CAL", "Economic calendar"],
+      ["CONG  /  CONG NVDA  /  CONG PELOSI", "Congressional trades"], ["INS  /  INS NVDA  /  INS BUYS", "Insider trades"],
+      ["13F", "Latest fund holdings filings"], ["PRED  /  KALSHI  /  PRED CRYPTO", "Prediction markets"],
+      ["TRACK", "Post-impact track record per person"], ["IMPACT", "Impact of the selected post"],
+      ["FEED TRUMP  /  FEED ALL", "Filter the market-movers feed by person"], ["ALERTS", "Show only alert posts"],
+      ["ALERT NVIDIA", "Add your own alert keyword (stored in this browser)"], ["UNALERT NVIDIA", "Remove a custom alert keyword"],
+      ["ALERT", "List custom alert keywords"], ["MUTE  /  UNMUTE", "Alert sound off/on"],
+      ["STATUS", "Data source health"], ["Alt+1 … Alt+0", "Switch bottom tabs"], ["/", "Focus the command bar"], ["Esc", "Clear command bar"],
+    ];
+    body.innerHTML = `<div class="help">${h.map(([k, v]) => `<div><code>${esc(k)}</code> <span class="dim">${esc(v)}</span></div>`).join("")}
+      <div style="margin-top:10px"><span class="amber">Alerts</span> <span class="dim">fire on new posts from direct sources (Truth Social, X, official feeds) that hit an alert topic
+      (tariffs, China, Fed, war, fiscal), an alert keyword, a watchlist company, or one of your custom keywords. Edit topics and keywords in config.json.</span></div></div>`;
+  },
+};
+
+/* ============================================================ commands */
+
+const RANGES = { "1D": "1d", "5D": "5d", "1M": "1mo", "3M": "3mo", "6M": "6mo", "1Y": "1y", "5Y": "5y" };
+
+function saveWatch() { store.set("watch", S.watch); }
+
+function runCommand(raw) {
+  const text = raw.trim();
+  if (!text) return;
+  const parts = text.toUpperCase().split(/\s+/).filter((w) => w !== "GO" && w !== "<GO>");
+  const [c, ...rest] = parts;
+  const arg = rest.join(" ");
+  const tabWith = (tab, sub) => { Object.assign(S.sub, sub || {}); showTab(tab); };
+  switch (c) {
+    case "HELP": case "H": case "?": return showTab("help");
+    case "ADD": {
+      const add = rest.filter((s) => !S.watch.includes(s));
+      S.watch.push(...add); saveWatch(); refreshQuotes(); return msg(add.length ? "Added " + add.join(", ") : "Already on watchlist");
+    }
+    case "DEL": case "RM": case "REMOVE":
+      S.watch = S.watch.filter((s) => !rest.includes(s)); saveWatch(); renderWatch(); return msg("Removed " + rest.join(", "));
+    case "NEWS": case "N": case "CN":
+      if (rest[0]) { loadChart(rest[0]); return tabWith("news", { newsSym: "1" }); }
+      return tabWith("news", { newsSym: "" });
+    case "CAL": case "ECO": case "ECON": return showTab("cal");
+    case "CONG": case "CONGRESS": return tabWith("cong", { congQ: arg });
+    case "INS": case "INSIDER": case "INSIDERS": {
+      const modes = { BUYS: "buys", BIG: "big", CLUSTER: "cluster", LATEST: "latest" };
+      if (modes[rest[0]]) return tabWith("ins", { insMode: modes[rest[0]] });
+      if (rest[0]) { loadChart(rest[0]); return tabWith("ins", { insMode: "sym" }); }
+      return tabWith("ins", { insMode: "latest" });
+    }
+    case "13F": return showTab("f13");
+    case "PRED": case "POLY": case "POLYMARKET":
+      return tabWith("pred", rest[0] === "KALSHI" ? { predVenue: "kalshi" } : { predVenue: "poly", ...(rest[0] ? { predTag: rest[0].toLowerCase() } : {}) });
+    case "KALSHI": return tabWith("pred", { predVenue: "kalshi" });
+    case "TRACK": case "TR": return showTab("track");
+    case "IMPACT": case "IMP": return showTab("impact");
+    case "STATUS": case "SOURCES": return showTab("status");
+    case "ALERTS": setSeg("#fsrc", "alert"); S.fsrc = "alert"; return renderFeed();
+    case "FEED": {
+      if (!arg || arg === "ALL") { S.fperson = ""; S.fsrc = ""; setSeg("#fsrc", ""); }
+      else {
+        const p = S.cfg.people.find((x) => x.toUpperCase().includes(arg));
+        if (!p) return msg("No person matching " + arg, true);
+        S.fperson = p;
+      }
+      fillPeople(); return renderFeed();
+    }
+    case "ALERT": {
+      const kw = text.slice(5).trim().toLowerCase();
+      if (!kw) return msg("Custom alerts: " + (S.customAlerts.join(", ") || "none"));
+      if (!S.customAlerts.includes(kw)) S.customAlerts.push(kw);
+      store.set("alerts", S.customAlerts); renderFeed(); updateMarkers(); return msg(`Alerting on "${kw}"`);
+    }
+    case "UNALERT": {
+      const kw = text.slice(7).trim().toLowerCase();
+      S.customAlerts = S.customAlerts.filter((k) => k !== kw); store.set("alerts", S.customAlerts); renderFeed(); return msg(`Removed "${kw}"`);
+    }
+    case "MUTE": S.sound = false; return syncToggles();
+    case "UNMUTE": S.sound = true; return syncToggles();
+  }
+  if (/^[A-Z0-9^=.\-]{1,15}$/.test(c)) return loadChart(c, RANGES[rest[0]]);
+  msg("Unknown command. Type HELP", true);
+}
+
+function setSeg(sel, v) { $$(sel + " button").forEach((b) => b.classList.toggle("on", b.dataset.v === v)); }
+function syncToggles() {
+  $("#sound").classList.toggle("on", S.sound); store.set("sound", S.sound);
+  $("#bell").classList.toggle("on", S.notify); store.set("notify", S.notify);
+}
+
+/* ============================================================ events */
+
+function bindEvents() {
+  $("#cmdwrap").addEventListener("submit", (e) => { e.preventDefault(); runCommand($("#cmd").value); $("#cmd").value = ""; });
+  document.addEventListener("keydown", (e) => {
+    const inInput = ["INPUT", "SELECT", "TEXTAREA"].includes(document.activeElement.tagName);
+    if (e.altKey && /^[0-9]$/.test(e.key)) {
+      e.preventDefault(); const i = (+e.key + 9) % 10; if (TABS[i]) showTab(TABS[i][0]); return;
+    }
+    if (e.key === "Escape") { $("#cmd").value = ""; $("#cmd").blur(); return; }
+    if (!inInput && (e.key === "/" || (/^[a-zA-Z]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey))) {
+      $("#cmd").focus(); if (e.key === "/") e.preventDefault();
+    }
+  });
+
+  // delegated clicks: ticker chips & watchlist rows & tape
+  document.addEventListener("click", (e) => {
+    const symEl = e.target.closest("[data-sym]");
+    if (symEl) { e.stopPropagation(); loadChart(symEl.dataset.sym); return; }
+    const post = e.target.closest(".post");
+    if (post && !e.target.closest("a")) { post.classList.toggle("open"); selectPost(post.dataset.id); return; }
+    const tab = e.target.closest("#tabs button");
+    if (tab) { showTab(tab.dataset.tab); return; }
+    const sg = e.target.closest("[data-seg] button");
+    if (sg) { S.sub[sg.parentElement.dataset.seg] = sg.dataset.v; renderTab(); return; }
+    const pr = e.target.closest("tr[data-post]");
+    if (pr) { selectPost(pr.dataset.post); return; }
+    const pp = e.target.closest("tr[data-person]");
+    if (pp) { S.fperson = pp.dataset.person; fillPeople(); renderFeed(); }
+  });
+
+  $("#ranges").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) loadChart(S.sym, b.dataset.v); });
+  $("#mkmode").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    S.mkmode = b.dataset.v; setSeg("#mkmode", S.mkmode); store.set("mkmode", S.mkmode); updateMarkers();
+  });
+  $("#fsrc").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; S.fsrc = b.dataset.v; setSeg("#fsrc", S.fsrc); renderFeed(); });
+  $("#fperson").addEventListener("change", (e) => { S.fperson = e.target.value; renderFeed(); });
+
+  $("#sound").addEventListener("click", () => { S.sound = !S.sound; syncToggles(); if (S.sound) beep(); });
+  $("#bell").addEventListener("click", async () => {
+    if (!("Notification" in window)) return msg("Notifications not supported in this browser", true);
+    if (S.notify) { S.notify = false; return syncToggles(); }
+    const perm = await Notification.requestPermission();
+    S.notify = perm === "granted"; syncToggles();
+    msg(S.notify ? "Desktop notifications on" : "Notifications blocked by the browser", !S.notify);
+  });
+}
+
+/* ============================================================ boot */
+
+async function boot() {
+  tickClock(); setInterval(tickClock, 1000);
+  S.cfg = await api("config");
+  S.watch = store.get("watch", S.cfg.watchlist);
+  S.customAlerts = store.get("alerts", []);
+  S.sound = store.get("sound", true);
+  S.notify = store.get("notify", false) && "Notification" in window && Notification.permission === "granted";
+  S.mkmode = store.get("mkmode", "key");
+  S.tab = store.get("tab", "news");
+  setSeg("#mkmode", S.mkmode);
+  syncToggles();
+  bindEvents();
+  initChart();
+  renderTabs();
+  mergePosts(await api("posts?limit=600"));
+  fillPeople();
+  renderFeed();
+  await refreshQuotes();
+  loadChart(store.get("sym", "SPY"));
+  renderTab();
+  connectStream();
+
+  setInterval(refreshQuotes, 15000);
+  setInterval(reloadPosts, 90000);                 // pick up impact measurements as they complete
+  setInterval(() => { if (["news", "pred", "status", "track"].includes(S.tab)) renderTab(); }, 60000);
+  setInterval(() => { if (S.range === "1d") loadChart(S.sym); }, 60000);
+  window.addEventListener("beforeunload", () => store.set("sym", S.sym));
+}
+
+boot().catch((e) => { document.body.insertAdjacentHTML("afterbegin", `<div style="color:#f55;padding:8px">Failed to start: ${esc(e.message)}. Is the server running?</div>`); });

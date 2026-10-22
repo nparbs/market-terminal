@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Market Terminal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%23ffa028'/><path d='M2 12l4-5 3 3 5-7' stroke='black' stroke-width='2' fill='none'/></svg>">
+</head>
+<body>
+  <div id="top">
+    <div id="brand">MKT TERMINAL</div>
+    <form id="cmdwrap" autocomplete="off">
+      <span class="prompt">&gt;</span>
+      <input id="cmd" placeholder="Ticker or command - try NVDA, ADD TSLA, CONG NVDA, PRED, HELP   ( / to focus )" spellcheck="false">
+      <button class="go" type="submit">GO</button>
+    </form>
+    <div id="cmdmsg"></div>
+    <div id="mkt">--</div>
+    <div id="clock">--:--:-- ET</div>
+    <button class="tbtn" id="bell" title="Desktop notifications">🔔 NOTIFY</button>
+    <button class="tbtn on" id="sound" title="Alert sound">🔊 SOUND</button>
+    <div id="conn" title="Live feed connection"></div>
+  </div>
+  <div id="tape"><div id="tapeinner"></div></div>
+
+  <div id="grid">
+    <section class="panel" id="watch">
+      <div class="ph"><span class="title">WATCHLIST</span><span class="sp"></span><span class="dim" id="wupd"></span></div>
+      <div class="pb"><table><thead><tr><th>SYM</th><th class="num">LAST</th><th class="num">CHG%</th><th></th></tr></thead><tbody id="wbody"></tbody></table></div>
+    </section>
+
+    <section class="panel" id="chartp">
+      <div class="ph" id="chartinfo">
+        <span class="sym" id="csym">SPY</span><span class="dim" id="cname"></span>
+        <span class="px" id="cpx"></span><span id="cchg"></span>
+        <span class="sp"></span>
+        <span class="dim">POSTS</span>
+        <span class="seg" id="mkmode"><button data-v="key" class="on">KEY</button><button data-v="all">ALL</button><button data-v="off">OFF</button></span>
+        <span class="seg" id="ranges"><button data-v="1d">1D</button><button data-v="5d" class="on">5D</button><button data-v="1mo">1M</button><button data-v="3mo">3M</button><button data-v="6mo">6M</button><button data-v="1y">1Y</button><button data-v="5y">5Y</button></span>
+      </div>
+      <div id="chartbox"><div id="chart"></div><div id="tip"></div></div>
+    </section>
+
+    <section class="panel" id="feedp">
+      <div class="ph">
+        <span class="title">MARKET MOVERS</span><span class="dim" id="fcount"></span>
+        <span class="sp"></span>
+        <select id="fperson"><option value="">All people</option></select>
+        <span class="seg" id="fsrc"><button data-v="" class="on">ALL</button><button data-v="direct">POSTS</button><button data-v="alert">ALERTS</button></span>
+      </div>
+      <div class="pb" id="feed"></div>
+    </section>
+
+    <section class="panel" id="bottom">
+      <div id="tabs"></div>
+      <div id="tabbar2"></div>
+      <div class="tabbody" id="tabbody"></div>
+    </section>
+  </div>
+
+  <script src="/static/vendor/lightweight-charts.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

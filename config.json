@@ -1,0 +1,99 @@
+{
+  "port": 8765,
+  "sec_user_agent": "MarketTerminal personal-use nparbs@gmail.com",
+
+  "watchlist": ["SPY", "QQQ", "DIA", "IWM", "NVDA", "AAPL", "TSLA", "MSFT", "AMZN", "META",
+                "GOOGL", "AMD", "TSM", "SMH", "XLE", "TLT", "GLD", "BTC-USD", "COIN", "DJT"],
+
+  "tape": ["ES=F", "NQ=F", "^GSPC", "^IXIC", "^DJI", "^RUT", "^VIX", "^TNX", "DX-Y.NYB",
+           "CL=F", "GC=F", "BTC-USD", "EURUSD=X", "USDJPY=X", "USDCNY=X"],
+
+  "impact_benchmark": "SPY",
+
+  "sources": [
+    {"type": "truth", "person": "Donald Trump", "handle": "realDonaldTrump", "id": "107780257626128497", "interval": 45, "enabled": true},
+    {"type": "truth", "person": "White House", "handle": "WhiteHouse", "id": "113686491998750334", "interval": 60, "enabled": true},
+
+    {"type": "rss", "person": "Federal Reserve", "url": "https://www.federalreserve.gov/feeds/press_all.xml", "interval": 120, "enabled": true},
+    {"type": "rss", "person": "Fed Speakers", "url": "https://www.federalreserve.gov/feeds/speeches.xml", "interval": 300, "enabled": true},
+    {"type": "rss", "person": "White House Actions", "url": "https://www.whitehouse.gov/presidential-actions/feed/", "interval": 180, "enabled": true},
+    {"type": "rss", "person": "USTR", "url": "https://ustr.gov/rss.xml", "interval": 300, "enabled": true},
+    {"type": "rss", "person": "SEC", "url": "https://www.sec.gov/news/pressreleases.rss", "interval": 300, "enabled": true},
+
+    {"type": "gnews", "person": "Elon Musk", "query": "\"Elon Musk\" (tweet OR posted OR \"on X\")", "interval": 300, "enabled": true},
+    {"type": "gnews", "person": "Fed Chair", "query": "\"Fed chair\" OR \"Federal Reserve chair\"", "interval": 300, "enabled": true},
+    {"type": "gnews", "person": "Scott Bessent", "query": "\"Bessent\" Treasury", "interval": 300, "enabled": true},
+    {"type": "gnews", "person": "Howard Lutnick", "query": "\"Lutnick\"", "interval": 300, "enabled": true},
+    {"type": "gnews", "person": "Jensen Huang", "query": "\"Jensen Huang\"", "interval": 600, "enabled": true},
+    {"type": "gnews", "person": "Bill Ackman", "query": "\"Bill Ackman\"", "interval": 600, "enabled": true},
+    {"type": "gnews", "person": "Michael Saylor", "query": "\"Michael Saylor\"", "interval": 600, "enabled": true},
+    {"type": "gnews", "person": "China MOFCOM", "query": "China \"Commerce Ministry\" OR MOFCOM", "interval": 600, "enabled": true},
+    {"type": "gnews", "person": "OPEC", "query": "OPEC output", "interval": 600, "enabled": true},
+
+    {"type": "x", "person": "Elon Musk", "handle": "elonmusk", "interval": 120, "enabled": true},
+    {"type": "x", "person": "Scott Bessent", "handle": "SecScottBessent", "interval": 300, "enabled": true},
+    {"type": "x", "person": "Bill Ackman", "handle": "BillAckman", "interval": 300, "enabled": true},
+
+    {"type": "rss", "person": "Example custom feed", "url": "https://rss.app/feeds/YOUR_FEED_ID.xml", "interval": 300, "enabled": false}
+  ],
+
+  "x_bearer_token": "",
+
+  "news_feeds": [
+    {"name": "CNBC", "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html"},
+    {"name": "MarketWatch", "url": "https://feeds.content.dowjones.io/public/rss/mw_topstories"},
+    {"name": "Investing", "url": "https://www.investing.com/rss/news.rss"}
+  ],
+
+  "alert_keywords": ["breaking", "effective immediately", "executive order", "sanction", "sanctions",
+                     "ban", "emergency", "default", "shutdown"],
+
+  "rules": [
+    {"name": "Tariffs/Trade", "alert": true, "tickers": ["SPY", "EEM", "FXI"],
+     "keywords": ["tariff", "tariffs", "trade deal", "trade war", "import tax", "duties", "reciprocal", "section 232", "section 301", "customs", "trade deficit"]},
+    {"name": "China", "alert": true, "tickers": ["FXI", "KWEB", "BABA", "TSM"],
+     "keywords": ["china", "chinese", "xi jinping", "president xi", "beijing", "taiwan", "ccp"]},
+    {"name": "Fed/Rates", "alert": true, "tickers": ["TLT", "XLF", "SPY"],
+     "keywords": ["federal reserve", "the fed", "fed chair", "powell", "interest rate", "interest rates", "rate cut", "rate cuts", "rate hike", "fomc", "inflation", "too late"]},
+    {"name": "Semis/AI", "alert": false, "tickers": ["SMH", "NVDA", "AMD"],
+     "keywords": ["semiconductor", "semiconductors", "chip", "chips", "artificial intelligence", "a.i.", "data center", "data centers"]},
+    {"name": "Energy/Oil", "alert": false, "tickers": ["USO", "XLE"],
+     "keywords": ["oil", "opec", "drill", "drilling", "gasoline", "gas prices", "natural gas", "lng", "barrel"]},
+    {"name": "Crypto", "alert": false, "tickers": ["BTC-USD", "COIN", "MSTR"],
+     "keywords": ["bitcoin", "crypto", "cryptocurrency", "btc", "ethereum", "stablecoin", "digital asset", "digital assets"]},
+    {"name": "War/Geopolitics", "alert": true, "tickers": ["ITA", "LMT", "USO", "GLD"],
+     "keywords": ["war", "military", "missile", "missiles", "airstrike", "airstrikes", "iran", "russia", "ukraine", "israel", "nato", "troops", "venezuela", "north korea"]},
+    {"name": "Pharma/Health", "alert": false, "tickers": ["XLV", "PFE", "LLY"],
+     "keywords": ["drug prices", "drug price", "pharmaceutical", "pharma", "medicare", "medicaid", "most favored nation"]},
+    {"name": "Autos", "alert": false, "tickers": ["TSLA", "GM", "F"],
+     "keywords": ["auto", "autos", "automobile", "car", "cars", "electric vehicle", "electric vehicles", "automakers"]},
+    {"name": "Banks", "alert": false, "tickers": ["XLF", "KBE"],
+     "keywords": ["bank", "banks", "banking", "debanking", "wall street"]},
+    {"name": "Fiscal/Tax", "alert": true, "tickers": ["SPY", "TLT"],
+     "keywords": ["tax cut", "tax cuts", "budget", "debt ceiling", "government shutdown", "deficit", "stimulus", "tariff dividend", "rebate", "big beautiful bill"]},
+    {"name": "Economy", "alert": false, "tickers": ["SPY", "IWM"],
+     "keywords": ["jobs report", "unemployment", "gdp", "recession", "economy", "manufacturing"]},
+    {"name": "Housing", "alert": false, "tickers": ["XHB", "FNMA"],
+     "keywords": ["mortgage", "mortgages", "housing", "fannie", "freddie", "home builders", "homebuilders"]},
+    {"name": "Metals", "alert": false, "tickers": ["SLX", "FCX", "MP"],
+     "keywords": ["steel", "aluminum", "copper", "titanium", "rare earth", "rare earths", "critical minerals", "lithium"]},
+    {"name": "Stock Market", "alert": false, "tickers": ["SPY", "QQQ"],
+     "keywords": ["stock market", "stocks", "dow", "nasdaq", "s&p", "all time high", "record high"]}
+  ],
+
+  "companies": {
+    "apple": "AAPL", "tesla": "TSLA", "nvidia": "NVDA", "microsoft": "MSFT", "amazon": "AMZN",
+    "google": "GOOGL", "alphabet": "GOOGL", "facebook": "META", "meta platforms": "META", "intel": "INTC",
+    "boeing": "BA", "ford": "F", "general motors": "GM", "exxon": "XOM", "chevron": "CVX",
+    "jpmorgan": "JPM", "jp morgan": "JPM", "goldman sachs": "GS", "walmart": "WMT", "disney": "DIS",
+    "netflix": "NFLX", "amd": "AMD", "tsmc": "TSM", "taiwan semiconductor": "TSM", "pfizer": "PFE",
+    "eli lilly": "LLY", "lockheed": "LMT", "coinbase": "COIN", "palantir": "PLTR", "oracle": "ORCL",
+    "broadcom": "AVGO", "micron": "MU", "qualcomm": "QCOM", "harley": "HOG", "mattel": "MAT",
+    "trump media": "DJT", "truth social": "DJT", "caterpillar": "CAT", "john deere": "DE", "fedex": "FDX",
+    "coca-cola": "KO", "coke": "KO", "pepsi": "PEP", "mcdonald's": "MCD", "starbucks": "SBUX",
+    "nike": "NKE", "costco": "COST", "berkshire": "BRK-B", "uber": "UBER", "lockheed martin": "LMT",
+    "raytheon": "RTX", "northrop": "NOC", "bank of america": "BAC", "citigroup": "C", "wells fargo": "WFC",
+    "unitedhealth": "UNH", "moderna": "MRNA",
+    "microstrategy": "MSTR", "us steel": "NPSCY", "nippon steel": "NPSCY", "honda": "HMC", "toyota": "TM"
+  }
+}
