@@ -11,7 +11,7 @@ from fastapi import Body, FastAPI
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import brief, db, extras, feeds, impact, market, options
+from . import brief, db, extras, feeds, impact, market, options, push
 from .tagger import Tagger
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -26,6 +26,10 @@ def apply_settings(s):
     if isinstance(s.get("watchlist"), list) and s["watchlist"]:
         CFG["watchlist"] = [str(x).upper() for x in s["watchlist"]][:200]
         tagger.watchlist = set(CFG["watchlist"])
+    if isinstance(s.get("custom_alerts"), list):
+        CFG["custom_alerts"] = [str(x).lower() for x in s["custom_alerts"]][:200]
+    if isinstance(s.get("push"), dict):
+        CFG["push"] = {**CFG.get("push", {}), **s["push"]}
 
 subscribers: set[asyncio.Queue] = set()
 status: dict[str, dict] = {}
@@ -75,10 +79,16 @@ async def poll_loop(src):
                 if db.insert_post(p) and not first:
                     fresh.append(p)
             for p in sorted(fresh, key=lambda x: x["ts"]):
-                p["notify"] = p["alert"] and time.time() - p["ts"] < FRESH_SECONDS
+                is_fresh = time.time() - p["ts"] < FRESH_SECONDS
+                p["notify"] = p["alert"] and is_fresh
                 if p["notify"]:
                     db.log_alert("post", f"{p['person']} ({p['source']})", p["text"][:500], p.get("url"), p["id"],
                                  ",".join(p["tickers"][:6]), p["ts"])
+                # The browser also alerts on its custom keywords; mirror that for the phone.
+                if p["notify"] or (is_fresh and push.matches_keyword(p["text"], CFG.get("custom_alerts", []))):
+                    tickers = " ".join("$" + t for t in p["tickers"][:6])
+                    push.fire(CFG, "post", f"{p['person']}" + (f" · {tickers}" if tickers else ""),
+                              p["text"][:1000], p.get("url"))
                 broadcast({"type": "post", "post": p})
             st.update(ok=True, last=time.time(), error=None, new=st["new"] + len(fresh))
         except Exception as e:
@@ -111,10 +121,12 @@ def on_unusual(u):
     scope = o.get("alert_scope", "mentioned")
     in_scope = scope == "all" or (scope == "watchlist" and u["symbol"] in CFG["watchlist"]) or u["mentioned"]
     if big and in_scope:
-        db.log_alert("flow", f"Unusual options: {u['symbol']} {u['exp'][5:]} {u['strike']:g}{u['type']}",
-                     f"${u['premium']:,.0f} premium · {u['volume']:,} contracts ({u['vol_oi']}x OI) · {u['fill']}"
-                     + (f" · leans {u['lean']}" if u["lean"] else "") + (" · mentioned in a post" if u["mentioned"] else ""),
-                     f"https://finance.yahoo.com/quote/{u['contract']}/", u["contract"], u["symbol"])
+        title = f"Unusual options: {u['symbol']} {u['exp'][5:]} {u['strike']:g}{u['type']}"
+        body = (f"${u['premium']:,.0f} premium · {u['volume']:,} contracts ({u['vol_oi']}x OI) · {u['fill']}"
+                + (f" · leans {u['lean']}" if u["lean"] else "") + (" · mentioned in a post" if u["mentioned"] else ""))
+        url = f"https://finance.yahoo.com/quote/{u['contract']}/"
+        db.log_alert("flow", title, body, url, u["contract"], u["symbol"])
+        push.fire(CFG, "flow", title, body, url)
     broadcast({"type": "flow", "item": u, "notify": big and in_scope})
 
 
@@ -143,6 +155,7 @@ async def brief_loop():
                 b = await brief.build(CFG)
                 db.save_brief(b["day"], b)
                 db.log_alert("brief", b["kind"], b["headline"], None, b["day"])
+                push.fire(CFG, "brief", f"Market Terminal: {b['kind']} brief", b["headline"])
                 broadcast({"type": "brief", "day": b["day"], "kind": b["kind"], "headline": b["headline"]})
         except Exception as e:
             status["brief"] = {"person": "Brief scheduler", "type": "internal", "ok": False, "error": str(e)[:150], "last": time.time()}
@@ -349,9 +362,20 @@ async def get_settings():
 
 @app.put("/api/settings")
 async def put_settings(values: dict = Body(...)):
-    allowed = {k: v for k, v in values.items() if k in ("watchlist", "custom_alerts", "ui", "history", "mkmode", "tab", "sym")}
+    allowed = {k: v for k, v in values.items()
+               if k in ("watchlist", "custom_alerts", "ui", "history", "mkmode", "tab", "sym", "push")}
     db.put_settings(allowed)
     apply_settings(allowed)
+    return {"ok": True}
+
+
+@app.post("/api/push/test")
+async def push_test():
+    if not push.settings(CFG)["topic"]:
+        return JSONResponse({"error": "Set an ntfy topic first"}, status_code=400)
+    ok = await push.send(CFG, "post", "Market Terminal", "Test alert: phone notifications work.", force=True)
+    if not ok:
+        return JSONResponse({"error": push.last_error or "ntfy didn't accept the message"}, status_code=502)
     return {"ok": True}
 
 

@@ -38,6 +38,7 @@ async function loadSettings() {
   };
   S.watch = pick("watchlist", "watch", S.cfg.watchlist);
   S.customAlerts = pick("custom_alerts", "alerts", []);
+  S.push = server.push || {};
   S.history = pick("history", null, []);
   S.mkmode = pick("mkmode", "mkmode", "key");
   S.tab = pick("tab", "tab", "brief");
@@ -383,6 +384,15 @@ function settingsHTML() {
       <div class="set-row"><input class="f" id="setkw" style="flex:1" placeholder="e.g. nvidia, rate cut"><button class="tbtn" id="setkwadd">ADD</button></div>
       <div class="bline">${S.customAlerts.map((k) => `<span class="cat" style="cursor:pointer" data-unkw="${esc(k)}">${esc(k)} ✕</span>`).join(" ") || `<span class="dim">none</span>`}</div>
     </div>
+    <div class="set-sec"><div class="lbl">PHONE ALERTS · ntfy</div>
+      <div class="note">Install the ntfy app, subscribe to a hard-to-guess topic, and enter it here. Alerts reach your phone while this terminal is running.</div>
+      <div class="set-row"><label>Topic</label><input class="f" id="setpushtopic" style="flex:1" placeholder="e.g. mt-alerts-7x2k" value="${esc(S.push.topic || "")}"></div>
+      <div class="set-row"><label>Server</label><input class="f" id="setpushserver" style="flex:1" value="${esc(S.push.server || "https://ntfy.sh")}"></div>
+      ${chk("setpushpost", "Alert posts and custom keywords", (S.push.kinds || {}).post !== false)}
+      ${chk("setpushflow", "Unusual options alerts", (S.push.kinds || {}).flow !== false)}
+      ${chk("setpushbrief", "Pre-market brief ready", (S.push.kinds || {}).brief !== false)}
+      <div class="set-row"><button class="tbtn" id="setpushsave">SAVE</button><button class="tbtn" id="setpushtest">SEND TEST</button><span id="setpushmsg" class="dim"></span></div>
+    </div>
     <div class="set-sec"><div class="lbl">DATABASE</div><div id="setdb" class="dim">loading…</div></div>`;
 }
 
@@ -419,6 +429,23 @@ function bindSettings(el) {
       const kw = $("#setkw").value.trim().toLowerCase();
       if (kw && !S.customAlerts.includes(kw)) { S.customAlerts.push(kw); saveSetting("custom_alerts", S.customAlerts); renderFeed(); updateMarkers(); }
       return rerender();
+    }
+    if (t.id === "setpushsave" || t.id === "setpushtest") {
+      S.push = {
+        topic: $("#setpushtopic").value.trim(), server: $("#setpushserver").value.trim() || "https://ntfy.sh",
+        kinds: { post: $("#setpushpost").checked, flow: $("#setpushflow").checked, brief: $("#setpushbrief").checked },
+      };
+      const say = (m) => { $("#setpushmsg").textContent = m; };
+      fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ push: S.push }) })
+        .then(async () => {
+          if (t.id === "setpushsave") return say("saved");
+          say("sending…");
+          const r = await fetch("/api/push/test", { method: "POST" });
+          const d = await r.json().catch(() => ({}));
+          say(r.ok ? "sent, check your phone" : d.error || "failed");
+        })
+        .catch(() => say("couldn't reach the server"));
+      return;
     }
     const uk = t.closest("[data-unkw]");
     if (uk) { S.customAlerts = S.customAlerts.filter((k) => k !== uk.dataset.unkw); saveSetting("custom_alerts", S.customAlerts); renderFeed(); return rerender(); }

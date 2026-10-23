@@ -115,7 +115,7 @@
 
 ### Always-on and mobile
 - [ ] Run on a home server or cheap VPS (Docker image + systemd) so tracking and alerts continue while the PC is off
-- [ ] Phone push alerts through ntfy.sh or a Telegram bot
+- [x] Phone push alerts through ntfy.sh (posts, custom keywords, unusual options, brief ready)
 - [ ] Password protection or a Tailscale guide for remote access
 - [ ] Better mobile layout, tuned for phones beyond the current stacked panels
 
@@ -150,7 +150,7 @@
 
 ### Reliability
 - [ ] Back off automatically on 429s per source
-- [ ] Tests for the tagger and impact math
+- [x] Tests for the tagger and impact math (`tests/`, plus phone pushes)
 - [ ] Health check if a source has been silent too long
 
 ---

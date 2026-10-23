@@ -72,6 +72,10 @@ News-coverage sources (the NEWS badge) don't trigger alerts by default, because 
 
 Click **🔔 NOTIFY** once to allow desktop notifications. They work while the tab is in the background.
 
+### Phone alerts (ntfy)
+
+To get alerts on your phone, install the [ntfy](https://ntfy.sh) app, subscribe to a hard-to-guess topic, and enter the same topic under **⚙ Settings → Phone alerts**. **SEND TEST** checks it works. You can turn each kind on or off: alert posts (including your custom `ALERT` keywords), unusual options alerts, and the pre-market brief. Pushes are capped at 10 a minute. They only go out while the terminal is running, and anyone who knows the topic name can read them, so pick one nobody will guess (or use your own ntfy server).
+
 ## Alert history and links
 
 The **ALERTS** tab lists every alert the terminal has fired: posts, options flow and briefs. Each row links to its source:
@@ -183,6 +187,15 @@ These are scraped or unofficial endpoints, so any of them can change or rate-lim
 No free X feed works anymore (Nitter is dead, and xcancel blocks RSS). Two options:
 1. **X API:** paid; read access starts around $200/month. Set the `X_BEARER_TOKEN` environment variable, or put the token in `x_bearer_token` in `config.json`. The `x` sources (Musk, Bessent, Ackman) switch on automatically.
 2. **An RSS bridge such as rss.app:** create a feed for an account, then add `{"type": "rss", "person": "Elon Musk", "url": "<feed url>"}` to `sources`.
+
+## Tests
+
+```
+python -m pip install pytest
+python -m pytest tests
+```
+
+They cover the keyword tagger, the post-impact math (live, overnight and pending posts, and the track record) and phone pushes. No network access is needed.
 
 ## Customising (`config.json`)
 
