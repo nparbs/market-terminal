@@ -12,6 +12,8 @@ const S = {
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// Links come from outside feeds, so only web addresses may become clickable.
+const safeUrl = (u) => (/^https?:\/\//i.test(String(u ?? "").trim()) ? esc(String(u).trim()) : "#");
 const api = async (p) => { const r = await fetch("/api/" + p); return r.json(); };
 const store = {
   get(k, d) { try { const v = localStorage.getItem("mt." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -388,7 +390,7 @@ function postHTML(p) {
       ${al ? `<span class="badge b-alert">ALERT</span>` : ""}
       <span class="sp" style="flex:1"></span>
       <span class="dim">${ago(p.ts)}</span>
-      ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener" title="Open original">↗</a>` : ""}
+      ${p.url ? `<a href="${safeUrl(p.url)}" target="_blank" rel="noopener" title="Open original">↗</a>` : ""}
     </div>
     <div class="ptext">${esc(p.text)}</div>
     ${p.tickers.length || p.categories.length ? `<div class="ptags">${p.tickers.map((t) => `<span class="chip" data-sym="${esc(t)}">${esc(t)}</span>`).join("")}${p.categories.map((c) => `<span class="cat">${esc(c)}</span>`).join("")}</div>` : ""}
@@ -633,7 +635,7 @@ const TAB_RENDER = {
     if (d.error) { body.innerHTML = errBox(d); return; }
     body.innerHTML = `<table><thead><tr><th>TIME ET</th><th>SRC</th><th>HEADLINE</th><th>TICKERS</th></tr></thead><tbody>${d.map((n) => `
       <tr><td class="dim" style="white-space:nowrap">${esc(fmtET(n.ts))}</td><td class="dim">${esc(n.source)}</td>
-      <td class="wrap"><a href="${esc(n.url)}" target="_blank" rel="noopener" class="${n.alert ? "down" : ""}" style="${n.alert ? "" : "color:var(--text)"}">${esc(n.title)}</a></td>
+      <td class="wrap"><a href="${safeUrl(n.url)}" target="_blank" rel="noopener" class="${n.alert ? "down" : ""}" style="${n.alert ? "" : "color:var(--text)"}">${esc(n.title)}</a></td>
       <td>${(n.tickers || []).slice(0, 4).map(chip).join(" ")}</td></tr>`).join("")}</tbody></table>`;
   },
 
@@ -671,7 +673,7 @@ const TAB_RENDER = {
     const rows = d.filter((r) => (!txn || r.txn.startsWith(txn)) && (!q || (r.ticker || "").toLowerCase() === ql || r.member.toLowerCase().includes(ql)));
     body.innerHTML = `<table><thead><tr><th>TRADED</th><th>FILED</th><th>MEMBER</th><th>TICKER</th><th>TXN</th><th>AMOUNT</th><th>ASSET</th><th class="num">XS RET</th></tr></thead><tbody>${rows.map((r) => `
       <tr><td>${esc(r.traded)}</td><td class="dim">${esc(r.filed)}</td>
-      <td>${r.member_url ? `<a href="${esc(r.member_url)}" target="_blank" rel="noopener" class="party-${esc(r.party)}">${esc(r.member)}</a>` : `<span class="party-${esc(r.party)}">${esc(r.member)}</span>`} <span class="dim">${esc(r.party)}-${esc(r.chamber[0] || "")}</span></td>
+      <td>${r.member_url ? `<a href="${safeUrl(r.member_url)}" target="_blank" rel="noopener" class="party-${esc(r.party)}">${esc(r.member)}</a>` : `<span class="party-${esc(r.party)}">${esc(r.member)}</span>`} <span class="dim">${esc(r.party)}-${esc(r.chamber[0] || "")}</span></td>
       <td>${chip(r.ticker)}</td><td class="${r.txn.startsWith("Purchase") ? "up" : r.txn.startsWith("Sale") ? "down" : ""}">${esc(r.txn)}</td>
       <td>${esc(r.amount)}</td><td class="dim" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.asset)}</td>
       <td class="num ${cls(r.excess_return)}" title="Return vs SPY since trade">${r.excess_return != null ? fmtPct(r.excess_return, 1) : ""}</td></tr>`).join("")}</tbody></table>`
@@ -686,7 +688,7 @@ const TAB_RENDER = {
       + `<span class="dim">SEC Form 4 via OpenInsider</span>`;
     loading();
     const d = await api(mode === "sym" ? "insiders?ticker=" + encodeURIComponent(S.sym) : "insiders?mode=" + mode);
-    const ilink = (r) => (r.insider_url ? `<a href="${esc(r.insider_url)}" target="_blank" rel="noopener" style="color:var(--text)">${esc(r.insider)}</a>` : esc(r.insider));
+    const ilink = (r) => (r.insider_url ? `<a href="${safeUrl(r.insider_url)}" target="_blank" rel="noopener" style="color:var(--text)">${esc(r.insider)}</a>` : esc(r.insider));
     if (!live()) return;
     if (d.error) { body.innerHTML = errBox(d); return; }
     body.innerHTML = `<table><thead><tr><th>FILED</th><th>TRADED</th><th>TICKER</th><th>COMPANY</th><th>INSIDER</th><th>TITLE</th><th>TYPE</th><th class="num">PRICE</th><th class="num">QTY</th><th class="num">ΔOWN</th><th class="num">VALUE</th><th>FILING</th></tr></thead><tbody>${d.map((r) => `
@@ -694,7 +696,7 @@ const TAB_RENDER = {
       <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.company)}</td><td>${ilink(r)}</td><td class="dim">${esc(r.title)}</td>
       <td class="${r.type.startsWith("P") ? "up" : r.type.startsWith("S") ? "down" : ""}">${esc(r.type)}</td>
       <td class="num">${esc(r.price)}</td><td class="num">${esc(r.qty)}</td><td class="num">${esc(r.delta_own)}</td><td class="num ${r.value.startsWith("-") ? "down" : "up"}">${esc(r.value)}</td>
-      <td>${r.filing_url ? `<a href="${esc(r.filing_url)}" target="_blank" rel="noopener">SEC ↗</a>` : ""}</td></tr>`).join("")}</tbody></table>`
+      <td>${r.filing_url ? `<a href="${safeUrl(r.filing_url)}" target="_blank" rel="noopener">SEC ↗</a>` : ""}</td></tr>`).join("")}</tbody></table>`
       + (d.length ? "" : `<div class="empty">No insider filings found.</div>`);
   },
 
@@ -705,7 +707,7 @@ const TAB_RENDER = {
     if (!live()) return;
     if (d.error) { body.innerHTML = errBox(d); return; }
     body.innerHTML = `<table><thead><tr><th>FILED ET</th><th>FORM</th><th>FILER</th><th>CIK</th></tr></thead><tbody>${d.map((r) => `
-      <tr><td class="dim">${esc(fmtET(r.ts, true))}</td><td>${esc(r.form)}</td><td><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.filer)}</a></td><td class="dim">${esc(r.cik)}</td></tr>`).join("")}</tbody></table>`;
+      <tr><td class="dim">${esc(fmtET(r.ts, true))}</td><td>${esc(r.form)}</td><td><a href="${safeUrl(r.url)}" target="_blank" rel="noopener">${esc(r.filer)}</a></td><td class="dim">${esc(r.cik)}</td></tr>`).join("")}</tbody></table>`;
   },
 
   async pred(bar, body, live) {
@@ -718,7 +720,7 @@ const TAB_RENDER = {
     if (!live()) return;
     if (d.error) { body.innerHTML = errBox(d); return; }
     body.innerHTML = `<div class="pcards">${d.map((e) => `
-      <div class="pcard"><h4><a href="${esc(e.url)}" target="_blank" rel="noopener" style="color:#fff">${esc(e.title)}</a></h4>
+      <div class="pcard"><h4><a href="${safeUrl(e.url)}" target="_blank" rel="noopener" style="color:#fff">${esc(e.title)}</a></h4>
       <div class="meta">${e.volume24h ? "24h vol $" + Math.round(e.volume24h).toLocaleString() : esc(e.series || "")}${e.end ? " · ends " + esc(e.end) : ""}</div>
       ${e.markets.map((m) => `<div class="prow"><div class="lbl"><div class="bar" style="width:${(m.yes * 100).toFixed(1)}%"></div><span>${esc(m.label)}</span></div>
         <div class="num" style="color:#fff">${(m.yes * 100).toFixed(m.yes < 0.01 ? 1 : 0)}%</div>
@@ -727,7 +729,7 @@ const TAB_RENDER = {
   },
 
   async track(bar, body, live) {
-    bar.innerHTML = `<span class="dim">How the benchmark (${esc(S.cfg.benchmark)}) moved after each person's posts. Builds up as the terminal runs; intraday data covers ~58 days.</span>`;
+    bar.innerHTML = `<span class="dim">How the benchmark (${esc(S.cfg.benchmark)}) moved after each person's posts. Builds up as the terminal runs; intraday data covers ~58 days.</span><a href="/api/trackrecord.csv" download>export CSV ↓</a>`;
     loading();
     const d = await api("trackrecord");
     if (!live()) return;
@@ -744,7 +746,7 @@ const TAB_RENDER = {
       </tbody></table>
       <div class="amber" style="margin-top:12px">BIGGEST MOVES AFTER A POST <span class="dim">(largest move in any tagged ticker)</span></div>
       <table><thead><tr><th>WHEN</th><th>PERSON</th><th>TICKER</th><th class="num">MOVE</th><th>POST</th></tr></thead><tbody>
-      ${d.movers.map((m) => `<tr class="click" data-post="${esc(m.id)}"><td class="dim" style="white-space:nowrap">${esc(fmtET(m.ts, true))}</td><td style="color:${personColor(m.person)}">${esc(m.person)}</td><td>${chip(m.ticker)}</td>${c(m.move)}<td class="wrap">${esc(m.text.slice(0, 140))}${S.byId[m.id] && S.byId[m.id].url ? `<a class="lnk" href="${esc(S.byId[m.id].url)}" target="_blank" rel="noopener">↗</a>` : ""}</td></tr>`).join("")}
+      ${d.movers.map((m) => `<tr class="click" data-post="${esc(m.id)}"><td class="dim" style="white-space:nowrap">${esc(fmtET(m.ts, true))}</td><td style="color:${personColor(m.person)}">${esc(m.person)}</td><td>${chip(m.ticker)}</td>${c(m.move)}<td class="wrap">${esc(m.text.slice(0, 140))}${S.byId[m.id] && S.byId[m.id].url ? `<a class="lnk" href="${safeUrl(S.byId[m.id].url)}" target="_blank" rel="noopener">↗</a>` : ""}</td></tr>`).join("")}
       </tbody></table>
       ${d.people.length ? "" : `<div class="empty">No measurements yet. Impact is computed a few minutes after each post (or after the next open for off-hours posts).</div>`}
       <div class="note">Correlation, not causation: a single post's move is mixed with everything else happening in the market. Averages get meaningful after dozens of posts.</div></div>`;
@@ -759,7 +761,7 @@ const TAB_RENDER = {
       const order = [S.cfg.benchmark, ...Object.keys(tk).filter((t) => t !== S.cfg.benchmark)];
       const c = (v) => `<td class="num ${cls(v)}">${v != null ? fmtPct(v, 2) : `<span class="dim">pending</span>`}</td>`;
       bar.innerHTML = `<span style="color:${personColor(p.person)};font-weight:700">${esc(p.person)}</span><span class="badge b-${esc(p.source)}">${SRC[p.source] || ""}</span>
-        <span class="dim">${esc(fmtET(p.ts, true))} ET</span>${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">open original ↗</a>` : ""}`;
+        <span class="dim">${esc(fmtET(p.ts, true))} ET</span>${p.url ? `<a href="${safeUrl(p.url)}" target="_blank" rel="noopener">open original ↗</a>` : ""}`;
       body.innerHTML = `<div class="detail">
         <div class="dtext">${esc(p.text)}</div>
         <div class="ptags">${p.tickers.map((t) => `<span class="chip" data-sym="${esc(t)}">${esc(t)}</span>`).join("")}${p.categories.map((x) => `<span class="cat">${esc(x)}</span>`).join("")}
@@ -784,8 +786,8 @@ const TAB_RENDER = {
     const [d, st] = await Promise.all([api("status"), api("db/stats")]);
     if (!live()) return;
     body.innerHTML = `<div class="note" style="padding:6px 8px">DATABASE · ${esc(st._path)} · ${st._size_mb} MB · ${Object.entries(st).filter(([k]) => !k.startsWith("_")).map(([k, v]) => `${esc(k.replace(/_/g, " "))} <b style="color:var(--text)">${fmtInt(v)}</b>`).join(" · ")}</div><table><thead><tr><th></th><th>SOURCE</th><th>TYPE</th><th>LAST CHECK</th><th class="num">NEW</th><th>NOTE</th></tr></thead><tbody>${Object.values(d).map((s) => `
-      <tr><td class="${s.ok ? "up" : s.ok === false ? "down" : "dim"}">●</td><td style="color:${personColor(s.person)}">${esc(s.person)}</td><td class="dim">${esc(SRC[s.type] || s.type)}</td>
-      <td class="dim">${s.last ? ago(s.last) + " ago" : "--"}</td><td class="num">${s.new ?? ""}</td><td class="${s.ok ? "dim" : "down"}">${esc(s.error || "ok")}</td></tr>`).join("")}</tbody></table>
+      <tr><td class="${s.warning ? "amber" : s.ok ? "up" : s.ok === false ? "down" : "dim"}">●</td><td style="color:${personColor(s.person)}">${esc(s.person)}</td><td class="dim">${esc(SRC[s.type] || s.type)}</td>
+      <td class="dim">${s.last ? ago(s.last) + " ago" : "--"}</td><td class="num">${s.new ?? ""}</td><td class="${s.warning ? "amber" : s.ok ? "dim" : "down"}">${esc(s.error || s.warning || "ok")}</td></tr>`).join("")}</tbody></table>
       ${S.cfg.x_enabled ? "" : `<div class="note" style="padding:0 8px 10px">X/Twitter: no API token set, so X accounts are tracked through news coverage (NEWS badge). To get posts directly, set an X API bearer token (env X_BEARER_TOKEN or "x_bearer_token" in config.json), or add an RSS feed for an account (e.g. from rss.app) as an "rss" source.</div>`}`;
   },
 
@@ -832,20 +834,20 @@ async function searchPosts(q) {
 
 TAB_RENDER.alerts = async (bar, body, live) => {
   const kind = S.sub.alertKind || "";
-  bar.innerHTML = seg("alertKind", [["", "ALL"], ["post", "POSTS"], ["flow", "OPTIONS"], ["brief", "BRIEFS"]], kind)
+  bar.innerHTML = seg("alertKind", [["", "ALL"], ["post", "POSTS"], ["flow", "OPTIONS"], ["brief", "BRIEFS"], ["prediction", "PREDICTIONS"]], kind)
     + `<span class="dim">Every alert the terminal has fired, stored in the database</span>`;
   loading();
   const d = await api("alerts?limit=500" + (kind ? "&kind=" + kind : ""));
   if (!live()) return;
-  const icon = { post: "⚠", flow: "⚡", brief: "☀" };
+  const icon = { post: "⚠", flow: "⚡", brief: "☀", prediction: "%" };
   body.innerHTML = `<table><thead><tr><th>WHEN ET</th><th></th><th>ALERT</th><th>DETAIL</th><th>TICKERS</th><th>LINK</th></tr></thead><tbody>${d.map((a) => {
     const action = a.kind === "post" ? `data-post="${esc(a.ref)}"` : a.kind === "brief" ? `data-brief="${esc(a.ref)}"` : a.symbol ? `data-flowsym="${esc(a.symbol)}"` : "";
     return `<tr class="click" ${action}><td class="dim" style="white-space:nowrap">${esc(fmtET(a.ts, true))}</td><td class="amber">${icon[a.kind] || "•"}</td>
       <td style="color:${a.kind === "post" ? personColor(a.title.split(" (")[0]) : "var(--amber)"}">${esc(a.title)}</td>
       <td class="wrap">${esc((a.body || "").slice(0, 220))}</td>
       <td>${(a.symbol || "").split(",").filter(Boolean).slice(0, 4).map(chip).join(" ")}</td>
-      <td>${a.url ? `<a href="${esc(a.url)}" target="_blank" rel="noopener">open ↗</a>` : a.kind === "brief" ? `<span class="dim">BRIEF tab</span>` : ""}</td></tr>`;
-  }).join("")}</tbody></table>` + (d.length ? "" : `<div class="empty">No alerts yet. They are logged here as they fire (posts, options flow, briefs).</div>`);
+      <td>${a.url ? `<a href="${safeUrl(a.url)}" target="_blank" rel="noopener">open ↗</a>` : a.kind === "brief" ? `<span class="dim">BRIEF tab</span>` : ""}</td></tr>`;
+  }).join("")}</tbody></table>` + (d.length ? "" : `<div class="empty">No alerts yet. They are logged here as they fire (posts, options flow, briefs, prediction swings).</div>`);
 };
 
 /* ============================================================ brief layout */
@@ -865,7 +867,7 @@ function briefHTML(b) {
       `<div class="bstat"><b>${P.count}</b> direct posts · <b class="${P.alert_count ? "down" : ""}">${P.alert_count}</b> alerts · ${P.news_count} news items</div>
       <div class="bline">${P.by_person.map(([p, n]) => `<span style="color:${personColor(p)}">${esc(p)} ${n}</span>`).join(" · ") || `<span class="dim">quiet night</span>`}</div>
       ${P.topics.length ? `<div class="bline">${P.topics.map(([t, n]) => `<span class="cat">${esc(t)} ${n}</span>`).join(" ")}</div>` : ""}
-      ${P.alerts.map((p) => `<div class="balert click" data-post="${esc(p.id)}"><span class="dim">${esc(fmtET(p.ts))}</span> <b style="color:${personColor(p.person)}">${esc(p.person)}</b> ${esc(p.text.slice(0, 180))}${p.url ? `<a class="lnk" href="${esc(p.url)}" target="_blank" rel="noopener">open ↗</a>` : ""}
+      ${P.alerts.map((p) => `<div class="balert click" data-post="${esc(p.id)}"><span class="dim">${esc(fmtET(p.ts))}</span> <b style="color:${personColor(p.person)}">${esc(p.person)}</b> ${esc(p.text.slice(0, 180))}${p.url ? `<a class="lnk" href="${safeUrl(p.url)}" target="_blank" rel="noopener">open ↗</a>` : ""}
         <div>${p.tickers.slice(0, 6).map((t) => `<span class="chip" data-sym="${esc(t)}">${esc(t)}</span>`).join(" ")}</div></div>`).join("")}`, "wide")}
     ${card(`${esc(b.calendar_label || "TODAY'S CALENDAR")} <span class="dim">USD · high/med</span>`, b.calendar.length ? `<table>${b.calendar.map((e) => {
       const p = etParts(new Date(e.ts * 1000));
@@ -874,14 +876,14 @@ function briefHTML(b) {
     ${card("GLOBAL MARKETS", `<table>${b.global.map(qrow).join("")}</table>`)}
     ${card("BIGGEST MOVERS <span class=\"dim\">watchlist + scanned names</span>", `<div class="b2"><table>${M.up.map(mrow).join("")}</table><table>${M.down.map(mrow).join("")}</table></div>`)}
     ${M.mentioned.length ? card("MENTIONED OVERNIGHT", `<table>${M.mentioned.map(mrow).join("")}</table>`) : ""}
-    ${card("PREDICTION MARKET SWINGS <span class=\"dim\">24h</span>", b.predictions.length ? `<table>${b.predictions.map((p) => `<tr><td><a href="${esc(p.url)}" target="_blank" rel="noopener" style="color:var(--text)">${esc(p.event)}</a> <span class="dim">${esc(p.label)}</span></td>
+    ${card("PREDICTION MARKET SWINGS <span class=\"dim\">24h</span>", b.predictions.length ? `<table>${b.predictions.map((p) => `<tr><td><a href="${safeUrl(p.url)}" target="_blank" rel="noopener" style="color:var(--text)">${esc(p.event)}</a> <span class="dim">${esc(p.label)}</span></td>
       <td class="num" style="color:#fff">${Math.round(p.yes * 100)}%</td><td class="num ${cls(p.change)}">${p.change > 0 ? "+" : ""}${(p.change * 100).toFixed(0)}pt</td></tr>`).join("")}</table>` : `<div class="dim">No big swings.</div>`, "wide")}
     ${card(`UNUSUAL OPTIONS <span class="dim">${esc(O.day || "no scan yet")} · ex-0DTE</span>`, O.top.length ? `<table>${O.top.slice(0, 10).map(optRow).join("")}</table>
       ${O.hot.length ? `<div class="bline">Volume vs avg: ${O.hot.map((r) => `<span class="chip" data-sym="${esc(r.symbol)}">${esc(r.symbol)} ${r.vol_vs_avg.toFixed(1)}×</span>`).join(" ")}</div>` : ""}
       ${O.mentioned.length ? `<div class="bline amber">On tickers mentioned overnight:</div><table>${O.mentioned.slice(0, 5).map(optRow).join("")}</table>` : ""}` : `<div class="dim">No unusual options recorded yet.</div>`)}
-    ${card("CONGRESS FILINGS <span class=\"dim\">since close</span>", b.congress.length ? `<table>${b.congress.map((r) => `<tr><td>${r.member_url ? `<a href="${esc(r.member_url)}" target="_blank" rel="noopener" class="party-${esc(r.party)}">${esc(r.member)}</a>` : esc(r.member)}</td><td>${chip(r.ticker)}</td>
+    ${card("CONGRESS FILINGS <span class=\"dim\">since close</span>", b.congress.length ? `<table>${b.congress.map((r) => `<tr><td>${r.member_url ? `<a href="${safeUrl(r.member_url)}" target="_blank" rel="noopener" class="party-${esc(r.party)}">${esc(r.member)}</a>` : esc(r.member)}</td><td>${chip(r.ticker)}</td>
       <td class="${r.txn.startsWith("Purchase") ? "up" : "down"}">${esc(r.txn)}</td><td class="dim">${esc(r.amount)}</td></tr>`).join("")}</table>` : `<div class="dim">No new disclosures.</div>`)}
-    ${card("INSIDER BUYS $100K+ <span class=\"dim\">since close</span>", b.insiders.length ? `<table>${b.insiders.map((r) => `<tr><td>${chip(r.ticker)}</td><td>${esc(r.insider)}</td><td class="dim">${esc(r.title)}</td><td class="num up">${esc(r.value)}</td><td>${r.filing_url ? `<a href="${esc(r.filing_url)}" target="_blank" rel="noopener">SEC ↗</a>` : ""}</td></tr>`).join("")}</table>` : `<div class="dim">None filed.</div>`)}
+    ${card("INSIDER BUYS $100K+ <span class=\"dim\">since close</span>", b.insiders.length ? `<table>${b.insiders.map((r) => `<tr><td>${chip(r.ticker)}</td><td>${esc(r.insider)}</td><td class="dim">${esc(r.title)}</td><td class="num up">${esc(r.value)}</td><td>${r.filing_url ? `<a href="${safeUrl(r.filing_url)}" target="_blank" rel="noopener">SEC ↗</a>` : ""}</td></tr>`).join("")}</table>` : `<div class="dim">None filed.</div>`)}
   </div>${b.errors.length ? `<div class="note" style="padding:0 10px 10px">Some sections failed: ${esc(b.errors.join(" | "))}</div>` : ""}`;
 }
 

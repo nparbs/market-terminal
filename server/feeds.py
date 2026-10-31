@@ -20,6 +20,44 @@ TRUTH = "https://truthsocial.com/api/v1"
 _truth_ids = {}
 _x_ids = {}
 
+MAX_BACKOFF = 3600
+SILENT_HOURS = {"truth": 48, "x": 48, "gnews": 48}  # how long each kind of source can normally stay quiet
+SILENT_HOURS_DEFAULT = 14 * 24  # official RSS feeds can go a while between releases
+
+
+class RateLimited(RuntimeError):
+    """A 429 from a fetch that doesn't go through httpx."""
+
+
+def rate_limited(e):
+    """For a 429 error, the seconds the server asked us to wait (0 if it didn't say). None for anything else."""
+    if isinstance(e, RateLimited):
+        return 0
+    if not (isinstance(e, httpx.HTTPStatusError) and e.response.status_code == 429):
+        return None
+    after = e.response.headers.get("Retry-After", "").strip()
+    if after.isdigit():
+        return int(after)
+    try:
+        return max(0, parsedate_to_datetime(after).timestamp() - time.time())
+    except (TypeError, ValueError):
+        return 0
+
+
+def backoff_delay(interval, strikes, retry_after=0):
+    """Double the wait for each 429 in a row, up to an hour. A longer Retry-After always wins."""
+    return max(min(interval * 2 ** strikes, MAX_BACKOFF), retry_after)
+
+
+def silent_warning(src, last_post, started, now=None):
+    """A note when a source's newest item is older than that kind of source normally goes, else None."""
+    hours = src.get("silent_hours", SILENT_HOURS.get(src["type"], SILENT_HOURS_DEFAULT))
+    since = last_post or started
+    quiet = ((now or time.time()) - since) / 3600
+    if quiet < hours:
+        return None
+    return f"silent for {quiet / 24:.1f} days (limit {hours} h): feed may have moved or broken"
+
 
 def strip_html(s):
     s = re.sub(r'<span class="quote-inline">.*?</span>', "", s or "", flags=re.S)  # Truth "RT: <url>" stub
@@ -62,6 +100,8 @@ async def _get_json(url, params):
         body, _, code = out.decode("utf8", "replace").rpartition("\n")
         if code.strip() == "200":
             return json.loads(body)
+        if code.strip() == "429":
+            raise RateLimited("Truth Social HTTP 429")
         raise RuntimeError(f"Truth Social HTTP {code.strip() or 'error'}")
     r = await client.get(url, params=params)
     r.raise_for_status()

@@ -391,6 +391,7 @@ function settingsHTML() {
       ${chk("setpushpost", "Alert posts and custom keywords", (S.push.kinds || {}).post !== false)}
       ${chk("setpushflow", "Unusual options alerts", (S.push.kinds || {}).flow !== false)}
       ${chk("setpushbrief", "Pre-market brief ready", (S.push.kinds || {}).brief !== false)}
+      ${chk("setpushprediction", "Prediction-market swings", (S.push.kinds || {}).prediction !== false)}
       <div class="set-row"><button class="tbtn" id="setpushsave">SAVE</button><button class="tbtn" id="setpushtest">SEND TEST</button><span id="setpushmsg" class="dim"></span></div>
     </div>
     <div class="set-sec"><div class="lbl">DATABASE</div><div id="setdb" class="dim">loading…</div></div>`;
@@ -433,7 +434,7 @@ function bindSettings(el) {
     if (t.id === "setpushsave" || t.id === "setpushtest") {
       S.push = {
         topic: $("#setpushtopic").value.trim(), server: $("#setpushserver").value.trim() || "https://ntfy.sh",
-        kinds: { post: $("#setpushpost").checked, flow: $("#setpushflow").checked, brief: $("#setpushbrief").checked },
+        kinds: { post: $("#setpushpost").checked, flow: $("#setpushflow").checked, brief: $("#setpushbrief").checked, prediction: $("#setpushprediction").checked },
       };
       const say = (m) => { $("#setpushmsg").textContent = m; };
       fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ push: S.push }) })

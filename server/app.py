@@ -8,10 +8,11 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import Body, FastAPI
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import brief, db, extras, feeds, impact, market, options, push
+from .guard import LocalGuard
 from .tagger import Tagger
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -34,6 +35,8 @@ def apply_settings(s):
 subscribers: set[asyncio.Queue] = set()
 status: dict[str, dict] = {}
 FRESH_SECONDS = 30 * 60  # only alert on posts newer than this (feeds sometimes surface old items)
+SWING_MAX_GAP = 2 * 3600  # compare hourly snapshots only; after downtime a big move isn't "within the hour"
+SWING_MAX_ALERTS = 5
 
 
 def broadcast(event):
@@ -62,14 +65,17 @@ async def fetch_source(src, first=False):
 async def poll_loop(src):
     key = _key(src)
     st = status[key] = {"person": src["person"], "type": src["type"], "ok": None, "last": None,
-                        "error": None, "new": 0}
+                        "error": None, "new": 0, "last_post": None, "warning": None}
+    started = time.time()
     if src["type"] == "x" and not X_TOKEN:
         st.update(ok=False, error="disabled: no X API token (set X_BEARER_TOKEN)")
         return
     # News-coverage sources mention companies constantly; by default only direct posts raise alerts.
     can_alert = src.get("alerts", src["type"] != "gnews")
     first = True
+    strikes = 0
     while True:
+        delay = max(15, src.get("interval", 120))
         try:
             posts = await fetch_source(src, first)
             fresh = []
@@ -90,11 +96,21 @@ async def poll_loop(src):
                     push.fire(CFG, "post", f"{p['person']}" + (f" · {tickers}" if tickers else ""),
                               p["text"][:1000], p.get("url"))
                 broadcast({"type": "post", "post": p})
-            st.update(ok=True, last=time.time(), error=None, new=st["new"] + len(fresh))
+            newest = max((p["ts"] for p in posts), default=0)
+            st["last_post"] = max(st["last_post"] or 0, newest) or None
+            st.update(ok=True, last=time.time(), error=None, new=st["new"] + len(fresh),
+                      warning=feeds.silent_warning(src, st["last_post"], started))
+            strikes = 0
         except Exception as e:
-            st.update(ok=False, last=time.time(), error=f"{type(e).__name__}: {str(e)[:150]}")
+            error = f"{type(e).__name__}: {str(e)[:150]}"
+            retry_after = feeds.rate_limited(e)
+            if retry_after is not None:
+                strikes += 1
+                delay = feeds.backoff_delay(delay, strikes, retry_after)
+                error = f"Rate limited (429), next try in {delay / 60:.0f} min"
+            st.update(ok=False, last=time.time(), error=error)
         first = False
-        await asyncio.sleep(max(15, src.get("interval", 120)))
+        await asyncio.sleep(delay)
 
 
 async def impact_loop():
@@ -190,13 +206,29 @@ async def archive_loop():
                         rows += [{"venue": "Polymarket", "event": e["title"], "label": m["label"], "yes": m["yes"]} for m in e["markets"]]
                 for e in await extras.kalshi():
                     rows += [{"venue": "Kalshi", "event": e["title"], "label": m["label"], "yes": m["yes"]} for m in e["markets"]]
+                last_ts, last_rows = db.last_prediction_snapshot()
                 db.snapshot_predictions(rows)
+                if last_ts and time.time() - last_ts < SWING_MAX_GAP:
+                    alert_prediction_swings(last_rows, rows)
             status["archive"] = {"person": "Database archiver", "type": "internal", "ok": True, "last": time.time(), "error": None}
         except Exception as e:
             status["archive"] = {"person": "Database archiver", "type": "internal", "ok": False, "last": time.time(),
                                  "error": f"{type(e).__name__}: {str(e)[:150]}"}
         n += 1
         await asyncio.sleep(600)
+
+
+def alert_prediction_swings(before, after):
+    """Log and push the biggest moves between two hourly snapshots."""
+    points = CFG.get("prediction_alert_points", 10)
+    if not points:
+        return
+    for s in extras.prediction_swings(before, after, points)[:SWING_MAX_ALERTS]:
+        title = f"{s['venue']}: {s['event']}"
+        body = f"{s['label']}: {s['was'] * 100:.0f}% to {s['yes'] * 100:.0f}% within the hour"
+        db.log_alert("prediction", title, body)
+        push.fire(CFG, "prediction", title, body)
+        broadcast({"type": "prediction", "title": title, "body": body})
 
 
 @asynccontextmanager
@@ -215,6 +247,7 @@ async def lifespan(app):
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(LocalGuard)
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 
 
@@ -421,6 +454,12 @@ async def db_stats():
 @app.get("/api/trackrecord")
 async def trackrecord():
     return impact.track_record(BENCH)
+
+
+@app.get("/api/trackrecord.csv")
+async def trackrecord_csv():
+    return Response(impact.track_record_csv(BENCH), media_type="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="track-record.csv"'})
 
 
 @app.get("/api/status")

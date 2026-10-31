@@ -128,7 +128,7 @@
 - [ ] Earnings calendar plus earnings-time markers on the chart
 
 ### Signals and analytics
-- [ ] Prediction-market swing alerts, e.g. rate-cut odds move more than 10 points in an hour
+- [x] Prediction-market swing alerts, e.g. rate-cut odds move more than 10 points in an hour (`prediction_alert_points` in `config.json`, 0 turns them off)
 - [ ] Closing brief at 16:15 ET: the day's biggest post reactions, options flow summary, after-hours movers
 - [ ] Send the brief to phone or email (ntfy / Telegram / SMTP)
 - [ ] Options: trade-level flow (sweeps, blocks) from a paid feed (Polygon, Unusual Whales, Tradier)
@@ -146,12 +146,17 @@
 - [ ] Prediction-market history charts from the stored snapshots
 - [ ] Watchlist groups / multiple watchlists
 - [ ] Mark a post's exact time on intraday charts with a vertical line
-- [ ] Export the track record to CSV
+- [x] Export the track record to CSV
+
+### Security (found in review, 2026-10-31)
+- [x] Other websites could reach the local server: no Host or Origin check, so any open page could change settings, including where phone alerts go. `server/guard.py` refuses them; `MT_ALLOWED_HOSTS` adds names for remote access.
+- [x] Links from outside feeds went straight into `href`, so a feed could supply a `javascript:` link. Only `http(s)` links are clickable now.
+- [ ] `x_bearer_token` sits in `config.json`, which git tracks. It's empty today, but filling it in would commit a secret. Read it from the environment or the database only.
 
 ### Reliability
-- [ ] Back off automatically on 429s per source
+- [x] Back off automatically on 429s per source
 - [x] Tests for the tagger and impact math (`tests/`, plus phone pushes)
-- [ ] Health check if a source has been silent too long
+- [x] Health check if a source has been silent too long (amber in SOURCES; `silent_hours` per source in `config.json`)
 
 ---
 

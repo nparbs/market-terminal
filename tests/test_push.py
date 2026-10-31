@@ -18,7 +18,7 @@ def cfg(**kw):
 
 def test_settings_defaults_and_kinds():
     assert push.settings({}) == {"topic": "", "server": "https://ntfy.sh",
-                                 "kinds": {"post": True, "flow": True, "brief": True}}
+                                 "kinds": {"post": True, "flow": True, "brief": True, "prediction": True}}
     c = cfg(server="https://ntfy.example.com/", kinds={"flow": False})
     assert push.settings(c)["server"] == "https://ntfy.example.com"
     assert push.enabled(c, "post") and not push.enabled(c, "flow")

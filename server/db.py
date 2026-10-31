@@ -324,6 +324,16 @@ def search_insiders(ticker=None, limit=500):
         return [json.loads(r[0]) for r in conn().execute(q, args).fetchall()]
 
 
+def last_prediction_snapshot():
+    """(when, rows) for the newest snapshot, or (None, []) if there are none yet."""
+    with _lock:
+        row = conn().execute("SELECT MAX(ts) FROM prediction_snapshots").fetchone()
+        if not row or row[0] is None:
+            return None, []
+        rows = conn().execute("SELECT venue, event, label, yes FROM prediction_snapshots WHERE ts=?", (row[0],)).fetchall()
+    return row[0], [{"venue": r[0], "event": r[1], "label": r[2], "yes": r[3]} for r in rows]
+
+
 def snapshot_predictions(rows):
     now = int(time.time())
     with _lock:

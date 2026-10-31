@@ -4,9 +4,13 @@ If the post landed during market hours we measure from the post time.
 If the market was closed we measure from the prior close to the first minutes after the next open,
 so an overnight post's reaction shows up as the opening gap.
 """
+import csv
+import io
+import re
 import time
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from . import db, market
 
@@ -126,3 +130,22 @@ def track_record(benchmark):
                   key=lambda x: -abs(x.get("avg30", 0)))
     movers.sort(key=lambda x: -abs(x["move"]))
     return {"benchmark": benchmark, "people": people, "categories": cats[:40], "movers": movers[:25]}
+
+
+def track_record_csv(benchmark):
+    """One row per measured post, newest first, with the benchmark's move at each horizon."""
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["time_utc", "person", "source", "topics", "tickers", "session", "benchmark",
+                *(f"move_{h}m_pct" for h in HORIZONS), "peak_60m_pct", "url", "text"])
+    for p in sorted(db.posts_with_impact(), key=lambda x: -x["ts"]):
+        b = (p["impact"] or {}).get("tickers", {}).get(benchmark) or {}
+        if "r30" not in b and "r5" not in b:
+            continue
+        when = datetime.fromtimestamp(p["ts"], timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        # A leading = + - @ would make a spreadsheet run the post's text as a formula.
+        text = re.sub(r"^(?=[=+\-@])", "'", p["text"])
+        w.writerow([when, p["person"], p["source"], " ".join(p["categories"] or []), " ".join(p["tickers"] or []),
+                    p["impact"].get("session"), benchmark, *(b.get(f"r{h}") for h in HORIZONS), b.get("peak"),
+                    p.get("url") or "", text])
+    return out.getvalue()

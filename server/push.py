@@ -10,9 +10,10 @@ import httpx
 
 log = logging.getLogger("push")
 
-KINDS = ("post", "flow", "brief")
-PRIORITY = {"post": 4, "flow": 3, "brief": 3}  # ntfy: 3 = default, 4 = high
-TAGS = {"post": ["rotating_light"], "flow": ["chart_with_upwards_trend"], "brief": ["newspaper"]}
+KINDS = ("post", "flow", "brief", "prediction")
+PRIORITY = {"post": 4, "flow": 3, "brief": 3, "prediction": 3}  # ntfy: 3 = default, 4 = high
+TAGS = {"post": ["rotating_light"], "flow": ["chart_with_upwards_trend"], "brief": ["newspaper"],
+        "prediction": ["bar_chart"]}
 MAX_PER_MINUTE = 10  # a burst of posts shouldn't flood the phone (or hit ntfy.sh's rate limit)
 
 _sent: deque[float] = deque()

@@ -129,6 +129,22 @@ async def filings_13f(ua):
 POLY_TAGS = ["economy", "fed-rates", "finance", "business", "crypto", "politics", "geopolitics", "tariffs"]
 
 
+def prediction_swings(before, after, min_points):
+    """Markets whose yes price moved at least min_points (of 100) between two snapshots, biggest first.
+    Prices near 0 or 100 on both sides are left out: thin markets jump there without saying much."""
+    was = {(r["venue"], r["event"], r["label"]): r["yes"] for r in before}
+    out = []
+    for r in after:
+        old, new = was.get((r["venue"], r["event"], r["label"])), r["yes"]
+        if not isinstance(old, (int, float)) or not isinstance(new, (int, float)):
+            continue
+        if max(old, new) < 0.03 or min(old, new) > 0.97:
+            continue
+        if abs(new - old) * 100 >= min_points:
+            out.append({**r, "was": old, "points": round((new - old) * 100, 1)})
+    return sorted(out, key=lambda x: -abs(x["points"]))
+
+
 async def polymarket(tag="economy"):
     async def fetch():
         r = await client.get("https://gamma-api.polymarket.com/events",
