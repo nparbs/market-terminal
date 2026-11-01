@@ -16,6 +16,10 @@ from .tagger import Tagger
 
 ROOT = Path(__file__).resolve().parent.parent
 CFG = json.loads((ROOT / "config.json").read_text(encoding="utf8"))
+# Private values such as your email and API tokens go in config.local.json, which git ignores.
+LOCAL_CFG = ROOT / "config.local.json"
+if LOCAL_CFG.exists():
+    CFG.update(json.loads(LOCAL_CFG.read_text(encoding="utf8")))
 X_TOKEN = os.environ.get("X_BEARER_TOKEN") or CFG.get("x_bearer_token") or ""
 BENCH = CFG.get("impact_benchmark", "SPY")
 tagger = Tagger(CFG)
