@@ -185,7 +185,7 @@ These are scraped or unofficial endpoints, so any of them can change or rate-lim
 ### Getting real X posts
 
 No free X feed works anymore (Nitter is dead, and xcancel blocks RSS). Two options:
-1. **X API:** paid; read access starts around $200/month. Set the `X_BEARER_TOKEN` environment variable, or put the token in `x_bearer_token` in `config.json`. The `x` sources (Musk, Bessent, Ackman) switch on automatically.
+1. **X API:** paid; read access starts around $200/month. Set the `X_BEARER_TOKEN` environment variable, or put the token in `x_bearer_token` in `config.local.json`. The `x` sources (Musk, Bessent, Ackman) switch on automatically.
 2. **An RSS bridge such as rss.app:** create a feed for an account, then add `{"type": "rss", "person": "Elon Musk", "url": "<feed url>"}` to `sources`.
 
 ## Tests
@@ -209,6 +209,17 @@ They cover the keyword tagger, the post-impact math (live, overnight and pending
 - `alert_keywords`, `watchlist`, `tape`, `impact_benchmark`.
 - `options`: scan universe, thresholds, alert settings.
 - `brief`: build time, futures and global symbols, Polymarket tags.
+
+Private values go in `config.local.json`, which git ignores and which overrides `config.json`:
+
+```json
+{
+  "sec_user_agent": "MarketTerminal personal-use you@example.com",
+  "x_bearer_token": "your-token"
+}
+```
+
+The SEC asks for a contact email in the user agent, so set `sec_user_agent` before using the 13F tab.
 
 Restart the server after editing. To run a second copy on another port, `set PORT=8766` before `python -m server.app`. Posts and impact data are stored in `data/terminal.db`; delete that file to start fresh.
 

@@ -786,7 +786,7 @@ const TAB_RENDER = {
     body.innerHTML = `<div class="note" style="padding:6px 8px">DATABASE · ${esc(st._path)} · ${st._size_mb} MB · ${Object.entries(st).filter(([k]) => !k.startsWith("_")).map(([k, v]) => `${esc(k.replace(/_/g, " "))} <b style="color:var(--text)">${fmtInt(v)}</b>`).join(" · ")}</div><table><thead><tr><th></th><th>SOURCE</th><th>TYPE</th><th>LAST CHECK</th><th class="num">NEW</th><th>NOTE</th></tr></thead><tbody>${Object.values(d).map((s) => `
       <tr><td class="${s.ok ? "up" : s.ok === false ? "down" : "dim"}">●</td><td style="color:${personColor(s.person)}">${esc(s.person)}</td><td class="dim">${esc(SRC[s.type] || s.type)}</td>
       <td class="dim">${s.last ? ago(s.last) + " ago" : "--"}</td><td class="num">${s.new ?? ""}</td><td class="${s.ok ? "dim" : "down"}">${esc(s.error || "ok")}</td></tr>`).join("")}</tbody></table>
-      ${S.cfg.x_enabled ? "" : `<div class="note" style="padding:0 8px 10px">X/Twitter: no API token set, so X accounts are tracked through news coverage (NEWS badge). To get posts directly, set an X API bearer token (env X_BEARER_TOKEN or "x_bearer_token" in config.json), or add an RSS feed for an account (e.g. from rss.app) as an "rss" source.</div>`}`;
+      ${S.cfg.x_enabled ? "" : `<div class="note" style="padding:0 8px 10px">X/Twitter: no API token set, so X accounts are tracked through news coverage (NEWS badge). To get posts directly, set an X API bearer token (env X_BEARER_TOKEN or "x_bearer_token" in config.local.json), or add an RSS feed for an account (e.g. from rss.app) as an "rss" source.</div>`}`;
   },
 
   async help(bar, body) {

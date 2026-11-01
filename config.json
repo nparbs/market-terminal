@@ -1,6 +1,6 @@
 {
   "port": 8765,
-  "sec_user_agent": "MarketTerminal personal-use nparbs@gmail.com",
+  "sec_user_agent": "MarketTerminal personal-use your-email@example.com",
 
   "watchlist": ["SPY", "QQQ", "DIA", "IWM", "NVDA", "AAPL", "TSLA", "MSFT", "AMZN", "META",
                 "GOOGL", "AMD", "TSM", "SMH", "XLE", "TLT", "GLD", "BTC-USD", "COIN", "DJT"],
@@ -61,7 +61,6 @@
     {"type": "rss", "person": "Example custom feed", "url": "https://rss.app/feeds/YOUR_FEED_ID.xml", "interval": 300, "enabled": false}
   ],
 
-  "x_bearer_token": "",
 
   "news_feeds": [
     {"name": "CNBC", "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html"},
